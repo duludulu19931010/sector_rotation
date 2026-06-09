@@ -1,0 +1,62 @@
+[
+  {
+    "group_name": "記憶體控制IC",
+    "stock_count": 3,
+    "matched": 3,
+    "net_5d": 5.725,
+    "net_1d": 1.268,
+    "change_5d_pct": -26.12,
+    "change_1d_pct": 30.97,
+    "label": "輪動",
+    "stocks": [
+      {
+        "code": "3259",
+        "name": "股票3259",
+        "close_price": 401.2,
+        "net_5d": 7.6027,
+        "net_1d": 3.001,
+        "change_5d_pct": -27.13,
+        "change_1d_pct": 37.3
+      },
+      {
+        "code": "8299",
+        "name": "股票8299",
+        "close_price": 75.4,
+        "net_5d": -0.662,
+        "net_1d": -0.4139,
+        "change_5d_pct": -80.87,
+        "change_1d_pct": -69.46
+      },
+      {
+        "code": "6485",
+        "name": "股票6485",
+        "close_price": 488.4,
+        "net_5d": -1.2161,
+        "net_1d": -1.3187,
+        "change_5d_pct": 29.65,
+        "change_1d_pct": 125.07
+      }
+    ]
+  },
+  {
+    "group_name": "ITO導電玻璃",
+    "stock_count": 1,
+    "matched": 1,
+    "net_5d": 0.273,
+    "net_1d": 0.476,
+    "change_5d_pct": -71.53,
+    "change_1d_pct": -88.74,
+    "label": "輪動",
+    "stocks": [
+      {
+        "code": "3615",
+        "name": "股票3615",
+        "close_price": 79.6,
+        "net_5d": 0.273,
+        "net_1d": 0.476,
+        "change_5d_pct": -71.53,
+        "change_1d_pct": -88.74
+      }
+    ]
+  }
+]

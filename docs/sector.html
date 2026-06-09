@@ -1,0 +1,508 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TW$FLOW · 族群資金儀表板</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500;700&family=JetBrains+Mono:wght@300;400;600&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
+<style>
+:root{
+  --ink:#07090d;--surf:#0d1118;--raised:#131a22;--line:#1a2535;
+  --muted:#243040;--dim:#4a6278;--body:#8aa8bf;--hi:#cce0f0;
+  --red:#f04030;--green:#00c070;--gold:#e8b840;
+  --mono:'JetBrains Mono',monospace;
+  --sans:'Noto Sans TC',sans-serif;
+  --fs:15px;           /* base font — 比原版大 */
+}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+html{scroll-behavior:smooth}
+body{
+  background:var(--ink);color:var(--body);
+  font-family:var(--sans);font-size:var(--fs);line-height:1.6;
+  min-height:100vh;
+}
+body::before{
+  content:'';position:fixed;inset:0;pointer-events:none;z-index:0;
+  background-image:radial-gradient(circle,rgba(74,98,120,.14) 1px,transparent 1px);
+  background-size:28px 28px;
+}
+
+/* ── TOP BAR ── */
+.bar{
+  position:sticky;top:0;z-index:200;height:54px;
+  background:rgba(7,9,13,.92);backdrop-filter:blur(14px);
+  border-bottom:1px solid var(--line);
+  display:flex;align-items:center;padding:0 22px;gap:18px;
+}
+.brand{font-family:var(--mono);font-size:18px;font-weight:600;
+  letter-spacing:3px;color:var(--hi)}
+.brand em{color:var(--gold);font-style:normal}
+.stamp{font-family:var(--mono);font-size:12px;color:var(--dim);
+  display:flex;align-items:center;gap:6px}
+.dot{width:7px;height:7px;background:var(--green);border-radius:50%;
+  animation:blink 2.2s ease-in-out infinite}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.2}}
+.tabs{display:flex;margin-left:auto;gap:2px}
+.tab{padding:6px 16px;font-family:var(--mono);font-size:12px;
+  letter-spacing:1px;color:var(--dim);cursor:pointer;border-radius:3px;
+  transition:all .16s;white-space:nowrap}
+.tab:hover{color:var(--body);background:var(--raised)}
+.tab.on{color:var(--gold);background:rgba(232,184,64,.08)}
+
+/* ── WRAP ── */
+.wrap{position:relative;z-index:1;max-width:1560px;margin:0 auto;padding:22px}
+.pane{display:none}.pane.on{display:block}
+
+/* ── SECTION LABEL ── */
+.slabel{
+  display:flex;align-items:center;gap:10px;
+  font-family:var(--mono);font-size:12px;letter-spacing:2px;
+  color:var(--dim);text-transform:uppercase;
+  margin-bottom:16px;padding-bottom:8px;
+  border-bottom:1px solid var(--line);
+}
+.slabel .bar2{width:3px;height:14px;background:var(--gold);border-radius:2px}
+
+/* ── PILLS ── */
+.pills{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px}
+.pill{display:flex;flex-direction:column;padding:9px 14px;min-width:116px;
+  background:var(--raised);border:1px solid var(--line);border-radius:4px}
+.plabel{font-family:var(--mono);font-size:10px;letter-spacing:1px;
+  color:var(--dim);margin-bottom:3px}
+.pval{font-family:var(--mono);font-size:20px;font-weight:600;color:var(--hi)}
+.pval.r{color:var(--red)}.pval.g{color:var(--green)}.pval.gold{color:var(--gold)}
+
+/* ── CARD ── */
+.card{background:var(--surf);border:1px solid var(--line);border-radius:6px;overflow:hidden}
+.chead{padding:10px 14px;border-bottom:1px solid var(--line);
+  background:var(--raised);display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.ctitle{font-family:var(--mono);font-size:12px;letter-spacing:1px;color:var(--dim)}
+.cbody{padding:14px}
+
+/* ── CTRL BTNS ── */
+.ctrls{display:flex;gap:6px;margin-left:auto}
+.cbtn{padding:4px 11px;font-family:var(--mono);font-size:11px;
+  color:var(--dim);background:var(--raised);border:1px solid var(--line);
+  border-radius:3px;cursor:pointer;transition:all .14s}
+.cbtn:hover{color:var(--body);border-color:var(--muted)}
+.cbtn.on{color:var(--gold);border-color:rgba(232,184,64,.45);
+  background:rgba(232,184,64,.07)}
+
+/* ── LEGEND ── */
+.legend{display:flex;flex-wrap:wrap;gap:14px;margin-bottom:10px}
+.li{display:flex;align-items:center;gap:6px;
+  font-family:var(--mono);font-size:12px;color:var(--dim)}
+.ld{width:10px;height:10px;border-radius:50%}
+
+/* ── BUBBLE CHART ── */
+#bubbleChart{width:100%;height:540px}
+
+/* ── FILTER TABLE ── */
+.ftable{width:100%;border-collapse:collapse}
+.ftable thead th{
+  font-family:var(--mono);font-size:11px;letter-spacing:1px;
+  color:var(--dim);text-align:left;padding:8px 11px;
+  border-bottom:1px solid var(--line);background:var(--raised);
+  white-space:nowrap}
+.ftable tbody tr.grow{border-bottom:1px solid var(--line);cursor:pointer}
+.ftable tbody tr.grow:hover td{background:var(--raised)}
+.ftable tbody td{padding:9px 11px;vertical-align:middle}
+.td-num{font-family:var(--mono);font-size:14px;text-align:right;white-space:nowrap}
+.td-name{font-size:15px;color:var(--hi)}
+.td-rank{font-family:var(--mono);font-size:12px;color:var(--dim);width:34px;text-align:center}
+.r{color:var(--red)}.g{color:var(--green)}.n{color:var(--dim)}
+
+/* bar in cell */
+.bcell{position:relative}
+.bbar{position:absolute;left:0;top:0;bottom:0;border-radius:2px;opacity:.2}
+.bval{position:relative;z-index:1}
+
+/* badge */
+.badge{display:inline-block;padding:2px 7px;border-radius:3px;
+  font-family:var(--mono);font-size:10px}
+.b主{background:rgba(240,64,48,.15);color:var(--red)}
+.b輪{background:rgba(220,110,50,.1);color:#dd8040}
+.b退{background:rgba(0,192,112,.1);color:var(--green)}
+.b觀{background:rgba(74,98,120,.15);color:var(--dim)}
+
+/* ── EXPAND ROW ── */
+tr.srow{display:none}
+tr.srow.on{display:table-row}
+tr.srow td{padding:0;background:rgba(7,9,13,.55);border-bottom:2px solid var(--muted)}
+.sinner{padding:11px 14px 15px}
+.shdr{
+  display:grid;
+  grid-template-columns:52px minmax(80px,1fr) 90px 110px 110px 110px;
+  gap:0 8px;
+  font-family:var(--mono);font-size:11px;letter-spacing:1px;color:var(--dim);
+  padding:6px 0;border-bottom:1px solid var(--line);margin-bottom:2px;
+}
+.srow-item{
+  display:grid;
+  grid-template-columns:52px minmax(80px,1fr) 90px 110px 110px 110px;
+  gap:0 8px;
+  padding:7px 0;border-bottom:1px solid rgba(26,37,53,.6);
+  font-size:14px;transition:background .1s;
+}
+.srow-item:hover{background:rgba(19,26,34,.6);border-radius:3px}
+.srow-item:last-child{border-bottom:none}
+.s-code{font-family:var(--mono);font-size:12px;color:var(--gold)}
+.s-name{color:var(--hi)}
+.s-num{font-family:var(--mono);font-size:13px;text-align:right}
+
+/* expand icon */
+.eico{
+  display:inline-block;width:17px;height:17px;line-height:17px;
+  text-align:center;border:1px solid var(--muted);border-radius:2px;
+  font-family:var(--mono);font-size:11px;color:var(--dim);
+  margin-right:7px;transition:transform .18s;flex-shrink:0;
+}
+.grow.exp .eico{transform:rotate(90deg);color:var(--gold);border-color:var(--gold)}
+
+/* ── EMPTY ── */
+.empty{padding:70px 30px;text-align:center;
+  font-family:var(--mono);font-size:14px;color:var(--dim)}
+.empty strong{display:block;color:var(--gold);font-size:16px;margin-bottom:8px}
+
+/* ── SCROLLBAR ── */
+::-webkit-scrollbar{width:5px;height:5px}
+::-webkit-scrollbar-track{background:var(--ink)}
+::-webkit-scrollbar-thumb{background:var(--muted);border-radius:3px}
+
+/* ── RESPONSIVE ── */
+@media(max-width:720px){
+  .wrap{padding:12px}
+  .bar{padding:0 12px}
+  .tab{padding:4px 9px;font-size:11px}
+  #bubbleChart{height:360px}
+  .shdr,.srow-item{grid-template-columns:44px 1fr 88px 100px}
+  .shdr>*:nth-child(n+5),.srow-item>*:nth-child(n+5){display:none}
+}
+</style>
+</head>
+<body>
+
+<header class="bar">
+  <div class="brand">TW<em>$</em>FLOW</div>
+  <div class="stamp"><span class="dot"></span><span id="stamp">載入中…</span></div>
+  <nav class="tabs">
+    <div class="tab on" data-p="bubble">板塊泡泡圖</div>
+    <div class="tab" data-p="inflow">流入低漲幅</div>
+    <div class="tab" data-p="stealth">偷偷布局</div>
+  </nav>
+</header>
+
+<div class="wrap">
+
+  <!-- ① Bubble -->
+  <div class="pane on" id="p-bubble">
+    <div class="slabel"><span class="bar2"></span>族群板塊輪動・資金動向分佈圖</div>
+    <div class="pills" id="pills"></div>
+    <div class="card">
+      <div class="chead">
+        <div class="ctitle">
+          X 軸＝五日淨買超（億）・資金出入量&nbsp;&nbsp;｜&nbsp;&nbsp;
+          Y 軸＝今日淨買超（億）・資金加速度&nbsp;&nbsp;｜&nbsp;&nbsp;
+          圓圈大小＝五日量絕對值
+        </div>
+        <div class="ctrls">
+          <div class="cbtn on" onclick="filterBubble('all',this)">全部</div>
+          <div class="cbtn" onclick="filterBubble('in',this)">流入</div>
+          <div class="cbtn" onclick="filterBubble('out',this)">流出</div>
+        </div>
+      </div>
+      <div class="cbody" style="padding:12px 12px 8px">
+        <div class="legend">
+          <div class="li"><div class="ld" style="background:#f04030"></div>主力・流入且上漲</div>
+          <div class="li"><div class="ld" style="background:#dd8040"></div>輪動・流入漲幅有限</div>
+          <div class="li"><div class="ld" style="background:#00c070"></div>退潮・資金明顯流出</div>
+          <div class="li"><div class="ld" style="background:#4a6278"></div>觀望・資金沉寂</div>
+        </div>
+        <div id="bubbleChart"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ② Inflow Low Gain -->
+  <div class="pane" id="p-inflow">
+    <div class="slabel"><span class="bar2"></span>資金大量流入・但漲幅仍低</div>
+    <div class="card">
+      <div class="chead">
+        <div class="ctitle">
+          五日淨買超(億)&gt;0 且 五日漲幅&lt;10%&nbsp;&nbsp;｜&nbsp;&nbsp;
+          排序：五日淨買超由大到小&nbsp;&nbsp;｜&nbsp;&nbsp;
+          點擊展開個股明細
+        </div>
+      </div>
+      <div id="inflowContent"></div>
+    </div>
+  </div>
+
+  <!-- ③ Stealth -->
+  <div class="pane" id="p-stealth">
+    <div class="slabel"><span class="bar2"></span>大盤跌但法人偷偷布局</div>
+    <div class="card">
+      <div class="chead">
+        <div class="ctitle">
+          今日淨買超(億)&gt;0 且 五日淨買超(億)&gt;0 且 五日漲幅&lt;0%&nbsp;&nbsp;｜&nbsp;&nbsp;
+          排序：五日淨買超由大到小&nbsp;&nbsp;｜&nbsp;&nbsp;
+          點擊展開個股明細
+        </div>
+      </div>
+      <div id="stealthContent"></div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+// ════════════════════════════════════
+//  CONFIG & STATE
+// ════════════════════════════════════
+const BASE = './assets/data/';
+let ALL = [], INFLOW = [], STEALTH = [];
+let chart = null;
+
+// ── TABS ──────────────────────────
+document.querySelectorAll('.tab').forEach(t =>
+  t.addEventListener('click', () => {
+    document.querySelectorAll('.tab').forEach(x => x.classList.remove('on'));
+    document.querySelectorAll('.pane').forEach(x => x.classList.remove('on'));
+    t.classList.add('on');
+    document.getElementById('p-' + t.dataset.p)?.classList.add('on');
+    if (t.dataset.p === 'bubble' && chart) setTimeout(() => chart.resize(), 60);
+  })
+);
+
+// ── FETCH ─────────────────────────
+const load = async p => {
+  try { const r = await fetch(p); if (!r.ok) throw r.status; return await r.json(); }
+  catch(e) { console.warn('load fail:', p, e); return null; }
+};
+
+// ── FORMAT ────────────────────────
+const fN = (v, d=2) => { const n = parseFloat(v); if (isNaN(n)) return '—'; return (n>0?'+':'')+n.toFixed(d); };
+const fYi  = v => fN(v,2) + '億';
+const fPct = v => fN(v,2) + '%';
+const cls  = v => parseFloat(v) > 0 ? 'r' : parseFloat(v) < 0 ? 'g' : 'n';
+
+// ── META ──────────────────────────
+async function loadMeta() {
+  const m = await load(BASE + 'metadata.json');
+  document.getElementById('stamp').textContent = m?.last_updated ?? '尚未更新';
+}
+
+// ════════════════════════════════════
+//  PILLS
+// ════════════════════════════════════
+function renderPills(data) {
+  const inR  = data.filter(r => r.net_5d > 0);
+  const outR = data.filter(r => r.net_5d < 0);
+  const si   = inR.reduce((s,r)  => s + r.net_5d, 0);
+  const so   = outR.reduce((s,r) => s + r.net_5d, 0);
+  const top  = data.reduce((a,b) => b.net_5d > a.net_5d ? b : a, {net_5d:-Infinity, group_name:'—'});
+  const bot  = data.reduce((a,b) => b.net_5d < a.net_5d ? b : a, {net_5d:Infinity,  group_name:'—'});
+  document.getElementById('pills').innerHTML = [
+    ['族群數',    data.length,              'gold'],
+    ['合計流入',  si.toFixed(1)+'億',       'r'],
+    ['合計流出',  Math.abs(so).toFixed(1)+'億','g'],
+    ['最強主力',  top.group_name.slice(0,6), 'r'],
+    ['最大退潮',  bot.group_name.slice(0,6), 'g'],
+    ['流入族群',  inR.length,               'r'],
+    ['流出族群',  outR.length,              'g'],
+  ].map(([l,v,c]) =>
+    `<div class="pill"><span class="plabel">${l}</span><span class="pval ${c}">${v}</span></div>`
+  ).join('');
+}
+
+// ════════════════════════════════════
+//  BUBBLE CHART
+// ════════════════════════════════════
+const BCOL = {'主力':'#f04030','輪動':'#dd8040','退潮':'#00c070','觀望':'#4a6278'};
+
+function renderBubble(data) {
+  const el = document.getElementById('bubbleChart');
+  if (!chart) { chart = echarts.init(el,null,{renderer:'canvas'}); window.addEventListener('resize',()=>chart.resize()); }
+
+  const grp = {'主力':[],'輪動':[],'退潮':[],'觀望':[]};
+  data.forEach(d => (grp[d.label]||grp['觀望']).push({ value:[d.net_5d, d.net_1d, Math.abs(d.net_5d)], name:d.group_name, _:d }));
+
+  const allX = data.map(d=>d.net_5d), allY = data.map(d=>d.net_1d);
+  const xp = (Math.max(...allX.map(Math.abs))||1)*.12;
+  const yp = (Math.max(...allY.map(Math.abs))||1)*.18;
+
+  const axs = {
+    axisLabel:{ color:'#4a6278',fontSize:13,fontFamily:'JetBrains Mono' },
+    splitLine:{ lineStyle:{color:'#1a2535',type:'dashed'} },
+    axisLine: { lineStyle:{color:'#1a2535'} },
+  };
+
+  chart.setOption({
+    backgroundColor:'transparent',
+    animation:true, animationDuration:500,
+    tooltip:{
+      trigger:'item',
+      backgroundColor:'#0d1118',borderColor:'#1a2535',borderWidth:1,
+      padding:[12,16],
+      textStyle:{color:'#8aa8bf',fontSize:14,fontFamily:'Noto Sans TC'},
+      formatter: p => {
+        const d = p.data._;
+        const nc = d.net_5d>=0?'#f04030':'#00c070';
+        const ac = d.net_1d>=0?'#f04030':'#00c070';
+        const pc = d.change_5d_pct>=0?'#f04030':'#00c070';
+        return `<b style="color:#cce0f0;font-size:16px">${d.group_name}</b>
+<div style="display:grid;grid-template-columns:auto auto;gap:4px 16px;font-family:'JetBrains Mono',mono;font-size:13px;margin-top:7px">
+  <span style="color:#4a6278">五日淨買超</span><span style="color:${nc};text-align:right">${fYi(d.net_5d)}</span>
+  <span style="color:#4a6278">今日淨買超</span><span style="color:${ac};text-align:right">${fYi(d.net_1d)}</span>
+  <span style="color:#4a6278">五日漲跌</span><span style="color:${pc};text-align:right">${fPct(d.change_5d_pct)}</span>
+  <span style="color:#4a6278">今日漲跌</span><span style="color:${d.change_1d_pct>=0?'#f04030':'#00c070'};text-align:right">${fPct(d.change_1d_pct)}</span>
+  <span style="color:#4a6278">個股數</span><span style="color:#cce0f0;text-align:right">${d.matched}/${d.stock_count}</span>
+</div>`;
+      }
+    },
+    legend:{ data:Object.keys(BCOL), right:10,top:4,
+      textStyle:{color:'#4a6278',fontSize:12,fontFamily:'JetBrains Mono'},
+      itemWidth:11,itemHeight:11 },
+    grid:{left:70,right:22,top:44,bottom:60},
+    xAxis:{...axs,
+      name:'資金出入量・五日淨買超（億）← 流出 ｜ 流入 →',
+      nameLocation:'middle',nameGap:40,
+      nameTextStyle:{color:'#4a6278',fontSize:13,fontFamily:'JetBrains Mono'},
+      axisLabel:{...axs.axisLabel,formatter:v=>(v>=0?'+':'')+v.toFixed(0)},
+      min:Math.min(...allX)-xp, max:Math.max(...allX)+xp,
+    },
+    yAxis:{...axs,
+      name:'資金加速度・今日淨買超（億）',
+      nameTextStyle:{color:'#4a6278',fontSize:13,fontFamily:'JetBrains Mono'},
+      axisLabel:{...axs.axisLabel,formatter:v=>(v>=0?'+':'')+v.toFixed(2)},
+      min:Math.min(...allY)-yp, max:Math.max(...allY)+yp,
+    },
+    graphic:[
+      {type:'text',left:'54%',top:'7%',   style:{text:'主力流入 ↗',fill:'rgba(240,64,48,.22)',fontSize:14,fontFamily:'Noto Sans TC'}},
+      {type:'text',left:'5%', top:'7%',   style:{text:'↖ 退潮觀望',fill:'rgba(0,192,112,.22)',fontSize:14,fontFamily:'Noto Sans TC'}},
+      {type:'text',left:'54%',bottom:'13%',style:{text:'輪動蓄勢 ↘',fill:'rgba(221,128,64,.2)',fontSize:14,fontFamily:'Noto Sans TC'}},
+      {type:'text',left:'5%', bottom:'13%',style:{text:'↙ 流出壓力',fill:'rgba(0,192,112,.18)',fontSize:14,fontFamily:'Noto Sans TC'}},
+    ],
+    series: Object.entries(grp).map(([nm,pts])=>({
+      name:nm, type:'scatter', data:pts,
+      symbolSize: d => Math.max(12,Math.min(72,d[2]*2.8+12)),
+      itemStyle:{ color:BCOL[nm],opacity:.8,borderColor:BCOL[nm],borderWidth:1 },
+      emphasis:{ itemStyle:{opacity:1,borderWidth:2,shadowBlur:14,shadowColor:BCOL[nm]} },
+      label:{
+        show:true,
+        formatter: p => p.data.name.length>6 ? p.data.name.slice(0,5)+'…' : p.data.name,
+        fontSize:11,color:'#8aa8bf',position:'top',distance:5,
+      },
+    })),
+  }, true);
+}
+
+function filterBubble(mode, btn) {
+  document.querySelectorAll('.cbtn').forEach(b=>b.classList.remove('on'));
+  btn.classList.add('on');
+  const d = mode==='in'  ? ALL.filter(r=>r.net_5d>0)
+          : mode==='out' ? ALL.filter(r=>r.net_5d<0)
+          : ALL;
+  renderBubble(d);
+}
+
+// ════════════════════════════════════
+//  FILTER TABLE
+// ════════════════════════════════════
+function stocksHTML(stocks) {
+  if (!stocks?.length)
+    return `<div class="sinner" style="color:var(--dim);font-size:14px">此族群暫無個股資料</div>`;
+  const rows = stocks.map(s=>`
+    <div class="srow-item">
+      <span class="s-code">${s.code}</span>
+      <span class="s-name">${s.name||s.code}</span>
+      <span class="s-num ${cls(s.change_1d_pct)}">${fPct(s.change_1d_pct)}</span>
+      <span class="s-num ${cls(s.net_1d)}">${fYi(s.net_1d)}</span>
+      <span class="s-num ${cls(s.change_5d_pct)}">${fPct(s.change_5d_pct)}</span>
+      <span class="s-num ${cls(s.net_5d)}">${fYi(s.net_5d)}</span>
+    </div>`).join('');
+  return `<div class="sinner">
+    <div class="shdr">
+      <span>代號</span><span>名稱</span>
+      <span style="text-align:right">今日漲跌</span>
+      <span style="text-align:right">今日淨買超(億)</span>
+      <span style="text-align:right">五日漲跌</span>
+      <span style="text-align:right">五日淨買超(億)</span>
+    </div>${rows}
+  </div>`;
+}
+
+function renderTable(data, elId) {
+  const el = document.getElementById(elId);
+  if (!data?.length) {
+    el.innerHTML = '<div class="empty"><strong>目前無符合條件的族群</strong>等待資料更新後顯示</div>';
+    return;
+  }
+  const maxN = Math.max(...data.map(r=>Math.abs(r.net_5d)));
+  const thead = `<thead><tr>
+    <th>#</th><th>族群名稱</th><th style="width:56px">個股數</th>
+    <th style="text-align:right">五日淨買超(億)</th>
+    <th style="text-align:right">今日淨買超(億)</th>
+    <th style="text-align:right">五日漲跌(%)</th>
+    <th style="text-align:right">今日漲跌(%)</th>
+    <th>屬性</th>
+  </tr></thead>`;
+  const tbody = data.map((r,i)=>{
+    const pct = Math.abs(r.net_5d)/maxN*100;
+    const bc  = r.net_5d>=0?'rgba(240,64,48,.22)':'rgba(0,192,112,.18)';
+    const rid = `${elId}-${i}`;
+    const lc  = (r.label||'觀')[0];
+    return `
+      <tr class="grow" onclick="toggle('${rid}',this)">
+        <td class="td-rank"><span class="eico">▶</span>${i+1}</td>
+        <td class="td-name">${r.group_name}</td>
+        <td class="td-num n">${r.matched??r.stock_count}</td>
+        <td class="td-num bcell">
+          <div class="bbar" style="width:${pct}%;background:${bc}"></div>
+          <span class="bval ${cls(r.net_5d)}">${fYi(r.net_5d)}</span>
+        </td>
+        <td class="td-num ${cls(r.net_1d)}">${fYi(r.net_1d)}</td>
+        <td class="td-num ${cls(r.change_5d_pct)}">${fPct(r.change_5d_pct)}</td>
+        <td class="td-num ${cls(r.change_1d_pct)}">${fPct(r.change_1d_pct)}</td>
+        <td><span class="badge b${lc}">${r.label}</span></td>
+      </tr>
+      <tr class="srow" id="${rid}"><td colspan="8">${stocksHTML(r.stocks)}</td></tr>`;
+  }).join('');
+  el.innerHTML = `<table class="ftable">${thead}<tbody>${tbody}</tbody></table>`;
+}
+
+function toggle(id, row) {
+  const tr = document.getElementById(id);
+  if (!tr) return;
+  const open = tr.classList.toggle('on');
+  row.classList.toggle('exp', open);
+}
+
+// ════════════════════════════════════
+//  BOOT
+// ════════════════════════════════════
+async function boot() {
+  await loadMeta();
+  [ALL, INFLOW, STEALTH] = await Promise.all([
+    load(BASE+'bubble_data.json'),
+    load(BASE+'inflow_low_gain.json'),
+    load(BASE+'stealth_accumulation.json'),
+  ]);
+  ALL    = ALL    || [];
+  INFLOW = INFLOW || [];
+  STEALTH= STEALTH|| [];
+
+  if (ALL.length) { renderPills(ALL); renderBubble(ALL); }
+  else document.getElementById('bubbleChart').innerHTML =
+    '<div class="empty"><strong>等待資料更新</strong>請先執行 python pipeline.py</div>';
+
+  renderTable(INFLOW,  'inflowContent');
+  renderTable(STEALTH, 'stealthContent');
+}
+
+boot();
+</script>
+</body>
+</html>
