@@ -80,9 +80,19 @@ def compute_stock_stats(
     inst["code"]  = inst["code"].astype(str).str.zfill(4)
     price["code"] = price["code"].astype(str).str.zfill(4)
 
-    # ── 五日合計 ──────────────────────────────────────
-    total_5d = (
+    # ── 近 20 日合計（inst 內所有資料）─────────────────
+    total_20d = (
         inst.groupby("code")["total_net"]
+        .sum().reset_index()
+        .rename(columns={"total_net": "total_20d_shares"})
+    )
+
+    # ── 五日合計（最近 5 個交易日）─────────────────────
+    inst_dates = sorted(inst["trade_date"].unique())
+    last5 = inst_dates[-5:] if len(inst_dates) >= 5 else inst_dates
+    total_5d = (
+        inst[inst["trade_date"].isin(last5)]
+        .groupby("code")["total_net"]
         .sum().reset_index()
         .rename(columns={"total_net": "total_5d_shares"})
     )
@@ -119,19 +129,22 @@ def compute_stock_stats(
     )
 
     # ── 合併 ─────────────────────────────────────────
-    df = total_5d.merge(total_1d, on="code", how="left")
+    df = total_5d.merge(total_20d, on="code", how="left")
+    df = df.merge(total_1d, on="code", how="left")
     df = df.merge(latest_price, on="code", how="left")
     df = df.merge(price_5d,     on="code", how="left")
     df = df.merge(price_1d,     on="code", how="left")
 
-    df["total_1d_shares"] = df["total_1d_shares"].fillna(0)
+    df["total_1d_shares"]  = df["total_1d_shares"].fillna(0)
+    df["total_20d_shares"] = df["total_20d_shares"].fillna(0)
     df["close_price"]  = pd.to_numeric(df["close_price"],  errors="coerce").fillna(0)
     df["close_5d_ago"] = pd.to_numeric(df["close_5d_ago"], errors="coerce")
     df["close_1d_ago"] = pd.to_numeric(df["close_1d_ago"], errors="coerce")
 
     # ── 億元換算 ─────────────────────────────────────
-    df["net_5d"] = (df["total_5d_shares"] * df["close_price"] * 1000 / 1e8).round(4)
-    df["net_1d"] = (df["total_1d_shares"] * df["close_price"] * 1000 / 1e8).round(4)
+    df["net_5d"]  = (df["total_5d_shares"]  * df["close_price"] * 1000 / 1e8).round(4)
+    df["net_1d"]  = (df["total_1d_shares"]  * df["close_price"] * 1000 / 1e8).round(4)
+    df["net_20d"] = (df["total_20d_shares"] * df["close_price"] * 1000 / 1e8).round(4)
 
     # ── 漲幅 ─────────────────────────────────────────
     df["change_5d_pct"] = np.where(
@@ -181,6 +194,7 @@ def compute_group_stats(
                 "close_price":   round(float(s.get("close_price", 0)), 2),
                 "net_5d":        round(float(s.get("net_5d", 0)), 4),
                 "net_1d":        round(float(s.get("net_1d", 0)), 4),
+                "net_20d":       round(float(s.get("net_20d", 0)), 4),
                 "change_5d_pct": round(float(s.get("change_5d_pct", 0)), 2),
                 "change_1d_pct": round(float(s.get("change_1d_pct", 0)), 2),
             })
@@ -193,6 +207,7 @@ def compute_group_stats(
 
         net_5d      = float(subset["net_5d"].sum())
         net_1d      = float(subset["net_1d"].sum())
+        net_20d     = float(subset["net_20d"].sum())
         change_5d   = float(subset["change_5d_pct"].mean())
         change_1d   = float(subset["change_1d_pct"].mean())
 
@@ -208,6 +223,7 @@ def compute_group_stats(
             "matched":       int(len(subset)),
             "net_5d":        round(net_5d,    3),   # X 軸
             "net_1d":        round(net_1d,    3),   # Y 軸
+            "net_20d":       round(net_20d,   3),   # 近20日累計
             "change_5d_pct": round(change_5d, 2),
             "change_1d_pct": round(change_1d, 2),
             "label":         label,
@@ -219,7 +235,7 @@ def compute_group_stats(
 def _empty_group(name: str, stock_count: int) -> dict:
     return {
         "group_name": name, "stock_count": stock_count, "matched": 0,
-        "net_5d": 0.0, "net_1d": 0.0,
+        "net_5d": 0.0, "net_1d": 0.0, "net_20d": 0.0,
         "change_5d_pct": 0.0, "change_1d_pct": 0.0, "label": "觀望",
     }
 
@@ -269,14 +285,15 @@ def export_json(
     out = Path(output_dir)
     out.mkdir(parents=True, exist_ok=True)
 
-    # bubble
+    # bubble（含個股明細，供點擊側欄使用）
     bubble = []
     for r in records:
         bubble.append({
             **r,
-            "x":    r["net_5d"],   # X 軸：五日淨買超（億）
-            "y":    r["net_1d"],   # Y 軸：今日淨買超（億）
-            "size": max(10, min(72, abs(r["net_5d"]) * 2.8 + 12)),
+            "x":      r["net_5d"],   # X 軸：五日淨買超（億）
+            "y":      r["net_1d"],   # Y 軸：今日淨買超（億）
+            "size":   max(10, min(72, abs(r["net_5d"]) * 2.8 + 12)),
+            "stocks": details.get(r["group_name"], []),
         })
 
     def attach(filtered: list[dict]) -> list[dict]:

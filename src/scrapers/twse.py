@@ -100,8 +100,9 @@ def fetch_t86_multi(days: int = 5,
     collected = 0
     offset    = 0
     today     = datetime.today()
+    max_offset = days * 2 + 15   # 涵蓋假日緩衝
 
-    while collected < days and offset < 30:
+    while collected < days and offset < max_offset:
         d = today - timedelta(days=offset)
         offset += 1
         if d.weekday() >= 5:        # 週末跳過

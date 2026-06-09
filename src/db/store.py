@@ -28,6 +28,11 @@ def init(db_path: str | Path) -> None:
     _DB.parent.mkdir(parents=True, exist_ok=True)
     with _conn() as c:
         c.executescript(_DDL)
+        # 遷移：舊版 group_daily 沒有 net_20d 欄位
+        cols = [r["name"] for r in c.execute("PRAGMA table_info(group_daily)")]
+        if "net_20d" not in cols:
+            c.execute("ALTER TABLE group_daily ADD COLUMN net_20d REAL DEFAULT 0")
+            logger.info("Migrated: added net_20d to group_daily")
     logger.info(f"DB ready: {_DB}")
 
 
@@ -83,6 +88,7 @@ CREATE TABLE IF NOT EXISTS group_daily (
     matched         INTEGER,
     net_5d          REAL,   -- 五日淨買超（億）X軸
     net_1d          REAL,   -- 今日淨買超（億）Y軸 = 資金加速度
+    net_20d         REAL,   -- 近20日累計淨買超（億）
     change_5d_pct   REAL,
     change_1d_pct   REAL,
     label           TEXT,
@@ -126,13 +132,17 @@ def today_str() -> str:
 # ── 快取查詢 ──────────────────────────────────────────
 
 def has_institutional(trade_date: str) -> bool:
-    """今日三大法人是否已入庫（筆數 > 1000 視為完整）"""
+    """今日三大法人是否已入庫（與歷史最大筆數相比 >= 50% 視為完整）"""
     td = _d(trade_date)
     with _conn() as c:
         n = c.execute(
             "SELECT COUNT(*) FROM institutional_flow WHERE trade_date=?", (td,)
         ).fetchone()[0]
-    if n > 1000:
+        mx = c.execute(
+            "SELECT MAX(cnt) FROM (SELECT COUNT(*) AS cnt FROM institutional_flow GROUP BY trade_date)"
+        ).fetchone()[0] or 0
+    threshold = max(100, mx * 0.5)
+    if n >= threshold and n > 0:
         logger.info(f"[DB-CACHE] institutional {td}: {n} rows")
         return True
     return False
@@ -172,14 +182,20 @@ def has_etf_holdings(etf_code: str, trade_date: str) -> bool:
 # ── 讀取 ─────────────────────────────────────────────
 
 def get_institutional_dates(n: int = 10) -> list[str]:
-    """回傳有完整資料的最近 n 個交易日"""
+    """
+    回傳有完整資料的最近 n 個交易日
+    完整定義：該日筆數 >= 全部日期最大筆數的 50%（自適應，不寫死閾值）
+    """
     with _conn() as c:
         rows = c.execute("""
-            SELECT trade_date FROM institutional_flow
-            GROUP BY trade_date HAVING COUNT(*) > 1000
-            ORDER BY trade_date DESC LIMIT ?
-        """, (n,)).fetchall()
-    return [r["trade_date"] for r in rows]
+            SELECT trade_date, COUNT(*) AS cnt FROM institutional_flow
+            GROUP BY trade_date ORDER BY trade_date DESC
+        """).fetchall()
+    if not rows:
+        return []
+    max_cnt = max(r["cnt"] for r in rows)
+    threshold = max(100, max_cnt * 0.5)
+    return [r["trade_date"] for r in rows if r["cnt"] >= threshold][:n]
 
 
 def load_institutional(days: int = 5) -> pd.DataFrame:
@@ -320,6 +336,7 @@ def save_group_daily(records: list[dict], trade_date: str) -> int:
         _int(r.get("matched")),
         _flt(r.get("net_5d")),
         _flt(r.get("net_1d")),
+        _flt(r.get("net_20d")),
         _flt(r.get("change_5d_pct")),
         _flt(r.get("change_1d_pct")),
         r.get("label", ""),
@@ -327,8 +344,8 @@ def save_group_daily(records: list[dict], trade_date: str) -> int:
     with _conn() as c:
         c.executemany(
             "INSERT OR REPLACE INTO group_daily "
-            "(trade_date,group_name,stock_count,matched,net_5d,net_1d,"
-            "change_5d_pct,change_1d_pct,label) VALUES (?,?,?,?,?,?,?,?,?)",
+            "(trade_date,group_name,stock_count,matched,net_5d,net_1d,net_20d,"
+            "change_5d_pct,change_1d_pct,label) VALUES (?,?,?,?,?,?,?,?,?,?)",
             rows
         )
     logger.info(f"[DB] saved {len(rows)} group_daily for {td}")

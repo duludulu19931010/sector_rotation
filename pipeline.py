@@ -70,27 +70,25 @@ def step1_groups() -> dict:
 
 
 def step2_institutional(force: bool = False) -> pd.DataFrame:
-    log.info("=== Step 2: Institutional flow ===")
+    log.info("=== Step 2: Institutional flow (20 days) ===")
 
-    cached_dates = set(db.get_institutional_dates(10))
+    cached_dates = set(db.get_institutional_dates(25))
 
-    if not force and db.has_institutional(TODAY):
-        log.info("  [CACHE HIT] reading from DB")
-        return db.load_institutional(days=5)
+    if not force and db.has_institutional(TODAY) and len(cached_dates) >= 20:
+        log.info("  [CACHE HIT] reading 20 days from DB")
+        return db.load_institutional(days=20)
 
-    # 抓 API（已在 DB 的日期自動跳過）
-    df = fetch_t86_multi(days=5, cached_dates=cached_dates if not force else set())
-    if df.empty:
-        log.warning("  API returned nothing, using DB fallback")
-        return db.load_institutional(days=5)
+    # 抓 API：近 20 個交易日（已在 DB 的日期自動跳過，首次跑約 20 次 API，之後每天只抓 1 次）
+    df = fetch_t86_multi(days=20, cached_dates=cached_dates if not force else set())
+    if df.empty and not cached_dates:
+        log.warning("  API returned nothing and DB empty")
+        return pd.DataFrame()
 
-    # 只存新資料
-    new_df = df[~df["trade_date"].isin(cached_dates)] if not force else df
+    new_df = df[~df["trade_date"].isin(cached_dates)] if not force and not df.empty else df
     if not new_df.empty:
         db.save_institutional(new_df)
 
-    # 合併 DB 已有資料（確保有齊 5 日）
-    return db.load_institutional(days=5)
+    return db.load_institutional(days=20)
 
 
 def step3_prices(force: bool = False) -> pd.DataFrame:

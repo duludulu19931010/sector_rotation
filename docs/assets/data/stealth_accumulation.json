@@ -1,61 +1,97 @@
 [
   {
-    "group_name": "記憶體控制IC",
+    "group_name": "ITO導電薄膜",
     "stock_count": 3,
     "matched": 3,
-    "net_5d": 5.725,
-    "net_1d": 1.268,
-    "change_5d_pct": -26.12,
-    "change_1d_pct": 30.97,
+    "net_5d": 8.86,
+    "net_1d": 4.033,
+    "net_20d": -0.035,
+    "change_5d_pct": -46.63,
+    "change_1d_pct": -38.33,
     "label": "輪動",
     "stocks": [
       {
-        "code": "3259",
-        "name": "股票3259",
-        "close_price": 401.2,
-        "net_5d": 7.6027,
-        "net_1d": 3.001,
-        "change_5d_pct": -27.13,
-        "change_1d_pct": 37.3
+        "code": "4720",
+        "name": "股4720",
+        "close_price": 644.4,
+        "net_5d": 8.1259,
+        "net_1d": 3.7375,
+        "net_20d": -3.338,
+        "change_5d_pct": -1.84,
+        "change_1d_pct": 27.0
       },
       {
-        "code": "8299",
-        "name": "股票8299",
-        "close_price": 75.4,
-        "net_5d": -0.662,
-        "net_1d": -0.4139,
-        "change_5d_pct": -80.87,
-        "change_1d_pct": -69.46
+        "code": "3663",
+        "name": "股3663",
+        "close_price": 127.7,
+        "net_5d": 0.7304,
+        "net_1d": 0.2912,
+        "net_20d": 3.4134,
+        "change_5d_pct": -44.6,
+        "change_1d_pct": -44.31
       },
       {
-        "code": "6485",
-        "name": "股票6485",
-        "close_price": 488.4,
-        "net_5d": -1.2161,
-        "net_1d": -1.3187,
-        "change_5d_pct": 29.65,
-        "change_1d_pct": 125.07
+        "code": "8240",
+        "name": "股8240",
+        "close_price": 15.6,
+        "net_5d": 0.0034,
+        "net_1d": 0.0041,
+        "net_20d": -0.1106,
+        "change_5d_pct": -93.44,
+        "change_1d_pct": -97.68
       }
     ]
   },
   {
-    "group_name": "ITO導電玻璃",
-    "stock_count": 1,
-    "matched": 1,
-    "net_5d": 0.273,
-    "net_1d": 0.476,
-    "change_5d_pct": -71.53,
-    "change_1d_pct": -88.74,
+    "group_name": "環氧樹脂",
+    "stock_count": 4,
+    "matched": 4,
+    "net_5d": 0.528,
+    "net_1d": 2.703,
+    "net_20d": -0.21,
+    "change_5d_pct": -7.62,
+    "change_1d_pct": -42.69,
     "label": "輪動",
     "stocks": [
       {
-        "code": "3615",
-        "name": "股票3615",
-        "close_price": 79.6,
-        "net_5d": 0.273,
-        "net_1d": 0.476,
-        "change_5d_pct": -71.53,
-        "change_1d_pct": -88.74
+        "code": "4764",
+        "name": "股4764",
+        "close_price": 419.9,
+        "net_5d": 2.2465,
+        "net_1d": 2.6118,
+        "net_20d": 0.3023,
+        "change_5d_pct": 81.77,
+        "change_1d_pct": 16.8
+      },
+      {
+        "code": "1303",
+        "name": "股1303",
+        "close_price": 420.9,
+        "net_5d": -4.1206,
+        "net_1d": 0.4167,
+        "net_20d": 1.5868,
+        "change_5d_pct": 30.43,
+        "change_1d_pct": -36.08
+      },
+      {
+        "code": "8240",
+        "name": "股8240",
+        "close_price": 15.6,
+        "net_5d": 0.0034,
+        "net_1d": 0.0041,
+        "net_20d": -0.1106,
+        "change_5d_pct": -93.44,
+        "change_1d_pct": -97.68
+      },
+      {
+        "code": "1717",
+        "name": "股1717",
+        "close_price": 217.1,
+        "net_5d": 2.399,
+        "net_1d": -0.33,
+        "net_20d": -1.9886,
+        "change_5d_pct": -49.24,
+        "change_1d_pct": -53.8
       }
     ]
   }
