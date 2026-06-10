@@ -422,14 +422,18 @@ function renderBubble(data){
       {type:'inside',yAxisIndex:0,filterMode:'none'},
     ],
     xAxis:{...axs,
-      name:'資金出入量・五日淨買超（億）',
-      nameLocation:'middle',nameGap:46,
-      nameTextStyle:{color:'#4a6278',fontSize:16,fontFamily:'JetBrains Mono'},
+      name:'← 流出　資金出入量・五日淨買超（億）　流入 →',
+      nameLocation:'middle',
+      nameGap:52,
+      nameTextStyle:{color:'#4a6278',fontSize:15,fontFamily:'JetBrains Mono'},
       axisLabel:{...axs.axisLabel,formatter:v=>(v>=0?'+':'')+v.toFixed(0)},
       min:Math.min(...allX)-xp,max:Math.max(...allX)+xp},
     yAxis:{...axs,
       name:'資金加速度・今日淨買超（億）',
-      nameTextStyle:{color:'#4a6278',fontSize:16,fontFamily:'JetBrains Mono'},
+      nameLocation:'end',
+      nameGap:14,
+      nameTextStyle:{color:'#4a6278',fontSize:15,fontFamily:'JetBrains Mono',
+        align:'left',padding:[0,0,0,4]},
       axisLabel:{...axs.axisLabel,formatter:v=>(v>=0?'+':'')+v.toFixed(2)},
       min:Math.min(...allY)-yp,max:Math.max(...allY)+yp},
     series:Object.entries(grp).map(([nm,pts])=>({
@@ -527,8 +531,8 @@ function renderTable(data,elId){
     <th>#</th><th>族群名稱</th><th style="width:64px">個股數</th>
     <th style="text-align:right">五日淨買超(億)</th>
     <th style="text-align:right">今日淨買超(億)</th>
-    <th style="text-align:right">五日漲跌(%)</th>
     <th style="text-align:right">今日漲跌(%)</th>
+    <th style="text-align:right">五日漲跌(%)</th>
     <th>屬性</th></tr></thead>`;
   const tbody=data.map((r,i)=>{
     const pct=Math.abs(r.net_5d)/maxN*100;
@@ -544,8 +548,8 @@ function renderTable(data,elId){
           <div class="bbar" style="width:${pct}%;background:${bc}"></div>
           <span class="bval ${cls(r.net_5d)}">${fYi(r.net_5d)}</span></td>
         <td class="td-num ${cls(r.net_1d)}">${fYi(r.net_1d)}</td>
-        <td class="td-num ${cls(r.change_5d_pct)}">${fPct(r.change_5d_pct)}</td>
         <td class="td-num ${cls(r.change_1d_pct)}">${fPct(r.change_1d_pct)}</td>
+        <td class="td-num ${cls(r.change_5d_pct)}">${fPct(r.change_5d_pct)}</td>
         <td><span class="badge b${lc}">${r.label}</span></td>
       </tr>
       <tr class="srow" id="${rid}"><td colspan="8">${stocksHTML(r.stocks)}</td></tr>`;
