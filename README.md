@@ -174,3 +174,31 @@ CSV 必須是 Big5 編碼。Excel 另存時選「CSV（逗號分隔，繁體中�
 ## 免責聲明
 
 資料來自 TWSE/TPEx 公開 API，非即時，存在揭露延遲。本專案為個人研究用途，不構成投資建議。
+
+---
+
+## 更新記錄
+
+### 2026-06-10
+
+**Bug 修復**
+
+- `KeyError: 'trade_date'` — `fetch_all_prices()` 現在明確帶入 `trade_date` 參數，回傳的 DataFrame 包含 `trade_date` 欄位，`compute_stock_stats` 不再炸掉
+- `has_prices` / `has_institutional` 快取判斷改為自適應閾值（`MAX(count) × 50%`），不再 hardcode 500/1000，適合小量模擬資料也能正確命中快取
+- TPEx API 空 body（`Expecting value: line 1 column 1`）— 加入備用端點 `companies_regular_trading_statistics`，任一端點成功即可；回傳空 body 時拋 ValueError 而非讓 JSON parser 炸
+- `fetch_all_prices()` 簽名改為 `fetch_all_prices(trade_date: str)`，如果你有自訂 script 呼叫此函式需同步更新
+
+**新功能**
+
+- 股票名稱對照表：`input/stock_list.csv`（CP950，`代號,名稱` 格式，1937 筆）優先覆蓋 API 回傳的名稱。泡泡圖側欄、篩選表個股明細、bubble_data.json 全部使用此表名稱
+- 泡泡圖 X 軸名稱移至底部中央（`nameLocation: 'middle'`），Y 軸名稱移至頂端（`nameLocation: 'end'`），方向指示改為 `← 流出　...　流入 →`
+
+**stock_list.csv 格式**
+
+```
+代號,名稱
+1101,台泥
+1102,亞泥
+...
+```
+CP950（Big5）編碼，第一列為 header，更新時直接替換檔案即可。
