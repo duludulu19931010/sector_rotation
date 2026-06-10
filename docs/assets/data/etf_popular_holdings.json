@@ -1,0 +1,72 @@
+[
+  {
+    "etf_code": "00403A",
+    "etf_name": "主動統一升級50",
+    "manager": "統一",
+    "data_date": "2026-06-10",
+    "holdings": []
+  },
+  {
+    "etf_code": "00992A",
+    "etf_name": "主動群益科技創新",
+    "manager": "群益",
+    "data_date": "2026-06-10",
+    "holdings": []
+  },
+  {
+    "etf_code": "00985A",
+    "etf_name": "主動野村台灣50",
+    "manager": "野村",
+    "data_date": "2026-06-10",
+    "holdings": []
+  },
+  {
+    "etf_code": "00991A",
+    "etf_name": "主動復華未來50",
+    "manager": "復華",
+    "data_date": "2026-06-10",
+    "holdings": []
+  },
+  {
+    "etf_code": "00981A",
+    "etf_name": "主動統一台股增長",
+    "manager": "統一",
+    "data_date": "2026-06-10",
+    "holdings": []
+  },
+  {
+    "etf_code": "00995A",
+    "etf_name": "主動中信台灣卓越",
+    "manager": "中國信託",
+    "data_date": "2026-06-10",
+    "holdings": []
+  },
+  {
+    "etf_code": "00994A",
+    "etf_name": "主動第一金台股優",
+    "manager": "第一金",
+    "data_date": "2026-06-10",
+    "holdings": []
+  },
+  {
+    "etf_code": "00984A",
+    "etf_name": "主動安聯台灣高息",
+    "manager": "安聯",
+    "data_date": "2026-06-10",
+    "holdings": []
+  },
+  {
+    "etf_code": "00982A",
+    "etf_name": "主動群益台灣強棒",
+    "manager": "群益",
+    "data_date": "2026-06-10",
+    "holdings": []
+  },
+  {
+    "etf_code": "00987A",
+    "etf_name": "主動台新優勢成長",
+    "manager": "台新",
+    "data_date": "2026-06-10",
+    "holdings": []
+  }
+]
