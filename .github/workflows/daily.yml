@@ -10,12 +10,17 @@ on:
         type: boolean
         default: false
 
+# 整個 workflow 層級的 permissions
+# deploy-pages 需要 id-token: write，必須在這裡宣告
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
 jobs:
   update:
     name: Fetch & Compute
     runs-on: self-hosted
-    permissions:
-      contents: write
 
     defaults:
       run:
@@ -87,20 +92,23 @@ jobs:
     name: Deploy GitHub Pages
     needs: update
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      pages: write
-      id-token: write
     environment:
       name: github-pages
       url: ${{ steps.deploy.outputs.page_url }}
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout (after data push)
+        uses: actions/checkout@v4
         with:
-          ref: main
-      - uses: actions/configure-pages@v5
-      - uses: actions/upload-pages-artifact@v3
+          ref: main   # 取最新 commit（含剛 push 的資料）
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
         with:
           path: docs/
-      - id: deploy
+
+      - name: Deploy to GitHub Pages
+        id: deploy
         uses: actions/deploy-pages@v4
