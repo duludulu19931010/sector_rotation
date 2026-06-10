@@ -1,0 +1,1018 @@
+[
+  {
+    "group_name": "微控制器IC",
+    "stock_count": 18,
+    "matched": 8,
+    "net_5d": 3700.727,
+    "net_1d": 8159.784,
+    "net_20d": -12564.608,
+    "change_5d_pct": 0.0,
+    "change_1d_pct": 0.0,
+    "label": "輪動",
+    "stocks": [
+      {
+        "code": "2308",
+        "name": "台達電",
+        "close_price": 2415.0,
+        "net_5d": 3620.5922,
+        "net_1d": 8096.2875,
+        "net_20d": -14919.387,
+        "change_5d_pct": 0.0,
+        "change_1d_pct": 0.0
+      },
+      {
+        "code": "3034",
+        "name": "聯詠",
+        "close_price": 480.5,
+        "net_5d": 168.3336,
+        "net_1d": 107.6849,
+        "net_20d": 2357.4051,
+        "change_5d_pct": 0.0,
+        "change_1d_pct": 0.0
+      },
+      {
+        "code": "4952",
+        "name": "凌通",
+        "close_price": 49.05,
+        "net_5d": 1.548,
+        "net_1d": -1.6908,
+        "net_20d": 3.4109,
+        "change_5d_pct": 0.0,
+        "change_1d_pct": 0.0
+      },
+      {
+        "code": "2458",
+        "name": "義隆",
+        "close_price": 161.0,
+        "net_5d": -31.8104,
+        "net_1d": -4.1425,
+        "net_20d": -217.6318,
+        "change_5d_pct": 0.0,
+        "change_1d_pct": 0.0
+      },
+      {
+        "code": "5471",
+        "name": "松翰",
+        "close_price": 49.7,
+        "net_5d": -21.0967,
+        "net_1d": -4.3463,
+        "net_20d": -0.0959,
+        "change_5d_pct": 0.0,
+        "change_1d_pct": 0.0
+      },
+      {
+        "code": "6202",
+        "name": "盛群",
+        "close_price": 52.9,
+        "net_5d": -9.0734,
+        "net_1d": -10.7413,
+        "net_20d": -4.1669,
+        "change_5d_pct": 0.0,
+        "change_1d_pct": 0.0
+      },
+      {
+        "code": "2436",
+        "name": "偉詮電",
+        "close_price": 67.6,
+        "net_5d": -25.2797,
+        "net_1d": -11.1168,
+        "net_20d": -34.2691,
+        "change_5d_pct": 0.0,
+        "change_1d_pct": 0.0
+      },
+      {
+        "code": "3014",
+        "name": "聯陽",
+        "close_price": 140.5,
+        "net_5d": -2.4868,
+        "net_1d": -12.1504,
+        "net_20d": 250.1265,
+        "change_5d_pct": 0.0,
+        "change_1d_pct": 0.0
+      }
+    ]
+  },
+  {
+    "group_name": "光通訊設備",
+    "stock_count": 30,
+    "matched": 16,
+    "net_5d": 2903.788,
+    "net_1d": 8228.799,
+    "net_20d": -13801.582,
+    "change_5d_pct": 0.0,
+    "change_1d_pct": 0.0,
+    "label": "輪動",
+    "stocks": [
+      {
+        "code": "2308",
+        "name": "台達電",
+        "close_price": 2415.0,
+        "net_5d": 3620.5922,
+        "net_1d": 8096.2875,
+        "net_20d": -14919.387,
+        "change_5d_pct": 0.0,
+        "change_1d_pct": 0.0
+      },
+      {
+        "code": "6442",
+        "name": "光聖",
+        "close_price": 2100.0,
+        "net_5d": 186.795,
+        "net_1d": 346.5,
+        "net_20d": 852.348,
+        "change_5d_pct": 0.0,
+        "change_1d_pct": 0.0
+      },
+      {
+        "code": "1618",
+        "name": "合機",
+        "close_price": 44.9,
+        "net_5d": 13.4525,
+        "net_1d": 12.6021,
+        "net_20d": 21.3495,
+        "change_5d_pct": 0.0,
+        "change_1d_pct": 0.0
+      },
+      {
+        "code": "4977",
+        "name": "眾達-KY",
+        "close_price": 192.5,
+        "net_5d": 0.6333,
+        "net_1d": 0.6256,
+        "net_20d": -244.6502,
+        "change_5d_pct": 0.0,
+        "change_1d_pct": 0.0
+      },
+      {
+        "code": "8045",
+        "name": "達運光電",
+        "close_price": 65.1,
+        "net_5d": -42.4218,
+        "net_1d": 0.6165,
+        "net_20d": -151.4434,
+        "change_5d_pct": 0.0,
+        "change_1d_pct": 0.0
+      },
+      {
+        "code": "2321",
+        "name": "東訊",
+        "close_price": 0.0,
+        "net_5d": 0.0,
+        "net_1d": 0.0,
+        "net_20d": 0.0,
+        "change_5d_pct": 0.0,
+        "change_1d_pct": 0.0
+      },
+      {
+        "code": "8011",
+        "name": "台通",
+        "close_price": 18.25,
+        "net_5d": -0.5475,
+        "net_1d": 0.0,
+        "net_20d": -0.73,
+        "change_5d_pct": 0.0,
+        "change_1d_pct": 0.0
+      },
+      {
+        "code": "3027",
+        "name": "盛達",
+        "close_price": 21.0,
+        "net_5d": 0.1067,
+        "net_1d": -0.6098,
+        "net_20d": 0.1067,
+        "change_5d_pct": 0.0,
+        "change_1d_pct": 0.0
+      },
+      {
+        "code": "2483",
+        "name": "百容",
+        "close_price": 33.6,
+        "net_5d": -7.8197,
+        "net_1d": -1.0537,
+        "net_20d": -4.1661,
+        "change_5d_pct": 0.0,
+        "change_1d_pct": 0.0
+      },
+      {
+        "code": "3669",
+        "name": "圓展",
+        "close_price": 36.4,
+        "net_5d": 8.222,
+        "net_1d": -1.092,
+        "net_20d": 5.7144,
+        "change_5d_pct": 0.0,
+        "change_1d_pct": 0.0
+      },
+      {
+        "code": "2413",
+        "name": "環科",
+        "close_price": 54.2,
+        "net_5d": -0.4076,
+        "net_1d": -1.626,
+        "net_20d": 4.9105,
+        "change_5d_pct": 0.0,
+        "change_1d_pct": 0.0
+      },
+      {
+        "code": "6277",
+        "name": "宏正",
+        "close_price": 75.1,
+        "net_5d": 0.751,
+        "net_1d": -2.253,
+        "net_20d": -3.5567,
+        "change_5d_pct": 0.0,
+        "change_1d_pct": 0.0
+      },
+      {
+        "code": "1608",
+        "name": "華榮",
+        "close_price": 34.3,
+        "net_5d": -16.0339,
+        "net_1d": -3.7593,
+        "net_20d": 116.6485,
+        "change_5d_pct": 0.0,
+        "change_1d_pct": 0.0
+      },
+      {
+        "code": "3704",
+        "name": "合勤控",
+        "close_price": 48.85,
+        "net_5d": -1.0254,
+        "net_1d": -6.6964,
+        "net_20d": 8.0256,
+        "change_5d_pct": 0.0,
+        "change_1d_pct": 0.0
+      },
+      {
+        "code": "2352",
+        "name": "佳世達",
+        "close_price": 30.65,
+        "net_5d": -4.9659,
+        "net_1d": -6.743,
+        "net_20d": -12.6217,
+        "change_5d_pct": 0.0,
+        "change_1d_pct": 0.0
+      },
+      {
+        "code": "2485",
+        "name": "兆赫",
+        "close_price": 68.0,
+        "net_5d": -853.5428,
+        "net_1d": -203.9993,
+        "net_20d": 525.8698,
+        "change_5d_pct": 0.0,
+        "change_1d_pct": 0.0
+      }
+    ]
+  },
+  {
+    "group_name": "傳動元件",
+    "stock_count": 21,
+    "matched": 13,
+    "net_5d": 1701.592,
+    "net_1d": 7771.599,
+    "net_20d": -15200.26,
+    "change_5d_pct": 0.0,
+    "change_1d_pct": 0.0,
+    "label": "輪動",
+    "stocks": [
+      {
+        "code": "2308",
+        "name": "台達電",
+        "close_price": 2415.0,
+        "net_5d": 3620.5922,
+        "net_1d": 8096.2875,
+        "net_20d": -14919.387,
+        "change_5d_pct": 0.0,
+        "change_1d_pct": 0.0
+      },
+      {
+        "code": "1526",
+        "name": "日馳",
+        "close_price": 14.6,
+        "net_5d": 0.0,
+        "net_1d": 0.0,
+        "net_20d": -1.022,
+        "change_5d_pct": 0.0,
+        "change_1d_pct": 0.0
+      },
+      {
+        "code": "2248",
+        "name": "華勝-KY",
+        "close_price": 56.4,
+        "net_5d": 0.0,
+        "net_1d": 0.0,
+        "net_20d": -9.024,
+        "change_5d_pct": 0.0,
+        "change_1d_pct": 0.0
+      },
+      {
+        "code": "4540",
+        "name": "全球傳動",
+        "close_price": 66.5,
+        "net_5d": -19.8782,
+        "net_1d": -0.1576,
+        "net_20d": -4.2427,
+        "change_5d_pct": 0.0,
+        "change_1d_pct": 0.0
+      },
+      {
+        "code": "4590",
+        "name": "4590",
+        "close_price": 75.0,
+        "net_5d": -3.75,
+        "net_1d": -1.5,
+        "net_20d": -3.0,
+        "change_5d_pct": 0.0,
+        "change_1d_pct": 0.0
+      },
+      {
+        "code": "1597",
+        "name": "直得",
+        "close_price": 160.0,
+        "net_5d": -19.84,
+        "net_1d": -1.6,
+        "net_20d": 205.3424,
+        "change_5d_pct": 0.0,
+        "change_1d_pct": 0.0
+      },
+      {
+        "code": "1536",
+        "name": "和大",
+        "close_price": 49.5,
+        "net_5d": 12.9824,
+        "net_1d": -3.7402,
+        "net_20d": 166.7477,
+        "change_5d_pct": 0.0,
+        "change_1d_pct": 0.0
+      },
+      {
+        "code": "2233",
+        "name": "宇隆",
+        "close_price": 305.5,
+        "net_5d": -11.4899,
+        "net_1d": -4.1273,
+        "net_20d": 147.3121,
+        "change_5d_pct": 0.0,
+        "change_1d_pct": 0.0
+      },
+      {
+        "code": "4583",
+        "name": "台灣精銳",
+        "close_price": 647.0,
+        "net_5d": 0.0,
+        "net_1d": -6.47,
+        "net_20d": -181.16,
+        "change_5d_pct": 0.0,
+        "change_1d_pct": 0.0
+      },
+      {
+        "code": "4576",
+        "name": "大銀微系統",
+        "close_price": 214.0,
+        "net_5d": -248.1672,
+        "net_1d": -9.6172,
+        "net_20d": -176.1498,
+        "change_5d_pct": 0.0,
+        "change_1d_pct": 0.0
+      },
+      {
+        "code": "2049",
+        "name": "上銀",
+        "close_price": 345.0,
+        "net_5d": -1065.36,
+        "net_1d": -75.9,
+        "net_20d": -88.3407,
+        "change_5d_pct": 0.0,
+        "change_1d_pct": 0.0
+      },
+      {
+        "code": "1590",
+        "name": "亞德客-KY",
+        "close_price": 1305.0,
+        "net_5d": -208.8,
+        "net_1d": -78.3,
+        "net_20d": -668.3166,
+        "change_5d_pct": 0.0,
+        "change_1d_pct": 0.0
+      },
+      {
+        "code": "1504",
+        "name": "東元",
+        "close_price": 73.1,
+        "net_5d": -354.6973,
+        "net_1d": -143.276,
+        "net_20d": 330.9807,
+        "change_5d_pct": 0.0,
+        "change_1d_pct": 0.0
+      }
+    ]
+  },
+  {
+    "group_name": "電阻器",
+    "stock_count": 16,
+    "matched": 8,
+    "net_5d": 1086.578,
+    "net_1d": 7280.275,
+    "net_20d": -9415.577,
+    "change_5d_pct": 0.0,
+    "change_1d_pct": 0.0,
+    "label": "輪動",
+    "stocks": [
+      {
+        "code": "2308",
+        "name": "台達電",
+        "close_price": 2415.0,
+        "net_5d": 3620.5922,
+        "net_1d": 8096.2875,
+        "net_20d": -14919.387,
+        "change_5d_pct": 0.0,
+        "change_1d_pct": 0.0
+      },
+      {
+        "code": "2478",
+        "name": "大毅",
+        "close_price": 167.0,
+        "net_5d": 157.9904,
+        "net_1d": 127.6331,
+        "net_20d": 255.348,
+        "change_5d_pct": 0.0,
+        "change_1d_pct": 0.0
+      },
+      {
+        "code": "2492",
+        "name": "華新科",
+        "close_price": 440.0,
+        "net_5d": 15.004,
+        "net_1d": 88.0,
+        "net_20d": 3316.412,
+        "change_5d_pct": 0.0,
+        "change_1d_pct": 0.0
+      },
+      {
+        "code": "2428",
+        "name": "興勤",
+        "close_price": 289.0,
+        "net_5d": 39.9282,
+        "net_1d": 51.6501,
+        "net_20d": 111.3459,
+        "change_5d_pct": 0.0,
+        "change_1d_pct": 0.0
+      },
+      {
+        "code": "6224",
+        "name": "聚鼎",
+        "close_price": 84.3,
+        "net_5d": -0.7326,
+        "net_1d": 0.1104,
+        "net_20d": -22.2097,
+        "change_5d_pct": 0.0,
+        "change_1d_pct": 0.0
+      },
+      {
+        "code": "6834",
+        "name": "天二科技",
+        "close_price": 75.0,
+        "net_5d": -0.75,
+        "net_1d": -0.75,
+        "net_20d": 68.8252,
+        "change_5d_pct": 0.0,
+        "change_1d_pct": 0.0
+      },
+      {
+        "code": "2371",
+        "name": "大同",
+        "close_price": 28.85,
+        "net_5d": -89.435,
+        "net_1d": -62.893,
+        "net_20d": -206.8167,
+        "change_5d_pct": 0.0,
+        "change_1d_pct": 0.0
+      },
+      {
+        "code": "2327",
+        "name": "國巨*",
+        "close_price": 826.0,
+        "net_5d": -2656.0195,
+        "net_1d": -1019.7631,
+        "net_20d": 1980.9049,
+        "change_5d_pct": 0.0,
+        "change_1d_pct": 0.0
+      }
+    ]
+  },
+  {
+    "group_name": "電感器",
+    "stock_count": 19,
+    "matched": 5,
+    "net_5d": 845.404,
+    "net_1d": 7116.772,
+    "net_20d": -9697.738,
+    "change_5d_pct": 0.0,
+    "change_1d_pct": 0.0,
+    "label": "輪動",
+    "stocks": [
+      {
+        "code": "2308",
+        "name": "台達電",
+        "close_price": 2415.0,
+        "net_5d": 3620.5922,
+        "net_1d": 8096.2875,
+        "net_20d": -14919.387,
+        "change_5d_pct": 0.0,
+        "change_1d_pct": 0.0
+      },
+      {
+        "code": "2492",
+        "name": "華新科",
+        "close_price": 440.0,
+        "net_5d": 15.004,
+        "net_1d": 88.0,
+        "net_20d": 3316.412,
+        "change_5d_pct": 0.0,
+        "change_1d_pct": 0.0
+      },
+      {
+        "code": "6155",
+        "name": "鈞寶",
+        "close_price": 80.7,
+        "net_5d": -34.701,
+        "net_1d": 0.0,
+        "net_20d": -22.6444,
+        "change_5d_pct": 0.0,
+        "change_1d_pct": 0.0
+      },
+      {
+        "code": "5434",
+        "name": "崇越",
+        "close_price": 456.0,
+        "net_5d": -99.4718,
+        "net_1d": -47.7523,
+        "net_20d": -53.0237,
+        "change_5d_pct": 0.0,
+        "change_1d_pct": 0.0
+      },
+      {
+        "code": "2327",
+        "name": "國巨*",
+        "close_price": 826.0,
+        "net_5d": -2656.0195,
+        "net_1d": -1019.7631,
+        "net_20d": 1980.9049,
+        "change_5d_pct": 0.0,
+        "change_1d_pct": 0.0
+      }
+    ]
+  },
+  {
+    "group_name": "通信網路線材",
+    "stock_count": 17,
+    "matched": 12,
+    "net_5d": 397.885,
+    "net_1d": -340.129,
+    "net_20d": 4477.697,
+    "change_5d_pct": 0.0,
+    "change_1d_pct": 0.0,
+    "label": "輪動",
+    "stocks": [
+      {
+        "code": "6197",
+        "name": "佳必琪",
+        "close_price": 343.0,
+        "net_5d": -248.3389,
+        "net_1d": 15.9083,
+        "net_20d": -943.0614,
+        "change_5d_pct": 0.0,
+        "change_1d_pct": 0.0
+      },
+      {
+        "code": "1618",
+        "name": "合機",
+        "close_price": 44.9,
+        "net_5d": 13.4525,
+        "net_1d": 12.6021,
+        "net_20d": 21.3495,
+        "change_5d_pct": 0.0,
+        "change_1d_pct": 0.0
+      },
+      {
+        "code": "1615",
+        "name": "大山",
+        "close_price": 44.9,
+        "net_5d": 1.347,
+        "net_1d": 1.347,
+        "net_20d": -2.245,
+        "change_5d_pct": 0.0,
+        "change_1d_pct": 0.0
+      },
+      {
+        "code": "8011",
+        "name": "台通",
+        "close_price": 18.25,
+        "net_5d": -0.5475,
+        "net_1d": 0.0,
+        "net_20d": -0.73,
+        "change_5d_pct": 0.0,
+        "change_1d_pct": 0.0
+      },
+      {
+        "code": "3011",
+        "name": "今皓",
+        "close_price": 14.55,
+        "net_5d": -0.2164,
+        "net_1d": -0.1455,
+        "net_20d": 0.0,
+        "change_5d_pct": 0.0,
+        "change_1d_pct": 0.0
+      },
+      {
+        "code": "1617",
+        "name": "榮星",
+        "close_price": 16.55,
+        "net_5d": -8.0691,
+        "net_1d": -0.2421,
+        "net_20d": -8.7584,
+        "change_5d_pct": 0.0,
+        "change_1d_pct": 0.0
+      },
+      {
+        "code": "2459",
+        "name": "敦吉",
+        "close_price": 68.7,
+        "net_5d": 71.448,
+        "net_1d": -1.374,
+        "net_20d": 72.822,
+        "change_5d_pct": 0.0,
+        "change_1d_pct": 0.0
+      },
+      {
+        "code": "6205",
+        "name": "詮欣",
+        "close_price": 81.7,
+        "net_5d": -3.2966,
+        "net_1d": -2.2222,
+        "net_20d": 13.8016,
+        "change_5d_pct": 0.0,
+        "change_1d_pct": 0.0
+      },
+      {
+        "code": "2392",
+        "name": "正崴",
+        "close_price": 39.05,
+        "net_5d": -32.2643,
+        "net_1d": -3.1998,
+        "net_20d": 43.0339,
+        "change_5d_pct": 0.0,
+        "change_1d_pct": 0.0
+      },
+      {
+        "code": "6192",
+        "name": "巨路",
+        "close_price": 128.5,
+        "net_5d": 2.8411,
+        "net_1d": -7.71,
+        "net_20d": 8.0454,
+        "change_5d_pct": 0.0,
+        "change_1d_pct": 0.0
+      },
+      {
+        "code": "3023",
+        "name": "信邦",
+        "close_price": 329.0,
+        "net_5d": -101.8847,
+        "net_1d": -61.9046,
+        "net_20d": 113.2484,
+        "change_5d_pct": 0.0,
+        "change_1d_pct": 0.0
+      },
+      {
+        "code": "3665",
+        "name": "貿聯-KY",
+        "close_price": 2155.0,
+        "net_5d": 703.4136,
+        "net_1d": -293.1878,
+        "net_20d": 5160.1906,
+        "change_5d_pct": 0.0,
+        "change_1d_pct": 0.0
+      }
+    ]
+  },
+  {
+    "group_name": "散熱片、風扇馬達、散熱模組",
+    "stock_count": 23,
+    "matched": 11,
+    "net_5d": 394.41,
+    "net_1d": 7595.838,
+    "net_20d": -21003.876,
+    "change_5d_pct": 0.0,
+    "change_1d_pct": 0.0,
+    "label": "輪動",
+    "stocks": [
+      {
+        "code": "2308",
+        "name": "台達電",
+        "close_price": 2415.0,
+        "net_5d": 3620.5922,
+        "net_1d": 8096.2875,
+        "net_20d": -14919.387,
+        "change_5d_pct": 0.0,
+        "change_1d_pct": 0.0
+      },
+      {
+        "code": "2376",
+        "name": "技嘉",
+        "close_price": 359.0,
+        "net_5d": -348.3916,
+        "net_1d": 345.3149,
+        "net_20d": -1758.3138,
+        "change_5d_pct": 0.0,
+        "change_1d_pct": 0.0
+      },
+      {
+        "code": "6831",
+        "name": "邁科",
+        "close_price": 776.0,
+        "net_5d": -44.1622,
+        "net_1d": 6.1226,
+        "net_20d": 22.6747,
+        "change_5d_pct": 0.0,
+        "change_1d_pct": 0.0
+      },
+      {
+        "code": "6591",
+        "name": "動力-KY",
+        "close_price": 58.2,
+        "net_5d": -1.4049,
+        "net_1d": -0.1152,
+        "net_20d": -1.8461,
+        "change_5d_pct": 0.0,
+        "change_1d_pct": 0.0
+      },
+      {
+        "code": "6230",
+        "name": "尼得科超眾",
+        "close_price": 137.0,
+        "net_5d": -0.1425,
+        "net_1d": -0.4233,
+        "net_20d": 3.4003,
+        "change_5d_pct": 0.0,
+        "change_1d_pct": 0.0
+      },
+      {
+        "code": "4912",
+        "name": "聯德控股-KY",
+        "close_price": 95.7,
+        "net_5d": -1.3676,
+        "net_1d": -0.935,
+        "net_20d": -1.3647,
+        "change_5d_pct": 0.0,
+        "change_1d_pct": 0.0
+      },
+      {
+        "code": "2459",
+        "name": "敦吉",
+        "close_price": 68.7,
+        "net_5d": 71.448,
+        "net_1d": -1.374,
+        "net_20d": 72.822,
+        "change_5d_pct": 0.0,
+        "change_1d_pct": 0.0
+      },
+      {
+        "code": "3338",
+        "name": "泰碩",
+        "close_price": 77.1,
+        "net_5d": -542.6244,
+        "net_1d": -2.6445,
+        "net_20d": -8.1734,
+        "change_5d_pct": 0.0,
+        "change_1d_pct": 0.0
+      },
+      {
+        "code": "2354",
+        "name": "鴻準",
+        "close_price": 58.8,
+        "net_5d": -71.4638,
+        "net_1d": -31.164,
+        "net_20d": 29.8175,
+        "change_5d_pct": 0.0,
+        "change_1d_pct": 0.0
+      },
+      {
+        "code": "2421",
+        "name": "建準",
+        "close_price": 160.0,
+        "net_5d": -140.6272,
+        "net_1d": -34.0176,
+        "net_20d": -5.1024,
+        "change_5d_pct": 0.0,
+        "change_1d_pct": 0.0
+      },
+      {
+        "code": "3017",
+        "name": "奇鋐",
+        "close_price": 2545.0,
+        "net_5d": -2147.4456,
+        "net_1d": -781.2132,
+        "net_20d": -4438.4036,
+        "change_5d_pct": 0.0,
+        "change_1d_pct": 0.0
+      }
+    ]
+  },
+  {
+    "group_name": "平面顯示器驅動IC",
+    "stock_count": 10,
+    "matched": 5,
+    "net_5d": 144.046,
+    "net_1d": 124.429,
+    "net_20d": 2049.666,
+    "change_5d_pct": 0.0,
+    "change_1d_pct": 0.0,
+    "label": "輪動",
+    "stocks": [
+      {
+        "code": "3034",
+        "name": "聯詠",
+        "close_price": 480.5,
+        "net_5d": 168.3336,
+        "net_1d": 107.6849,
+        "net_20d": 2357.4051,
+        "change_5d_pct": 0.0,
+        "change_1d_pct": 0.0
+      },
+      {
+        "code": "8016",
+        "name": "矽創",
+        "close_price": 295.5,
+        "net_5d": -9.2373,
+        "net_1d": 24.819,
+        "net_20d": -334.8488,
+        "change_5d_pct": 0.0,
+        "change_1d_pct": 0.0
+      },
+      {
+        "code": "3545",
+        "name": "敦泰",
+        "close_price": 54.0,
+        "net_5d": -0.8046,
+        "net_1d": -1.08,
+        "net_20d": 3.5154,
+        "change_5d_pct": 0.0,
+        "change_1d_pct": 0.0
+      },
+      {
+        "code": "4961",
+        "name": "天鈺",
+        "close_price": 169.5,
+        "net_5d": -11.5955,
+        "net_1d": -1.695,
+        "net_20d": -8.2055,
+        "change_5d_pct": 0.0,
+        "change_1d_pct": 0.0
+      },
+      {
+        "code": "3592",
+        "name": "瑞鼎",
+        "close_price": 265.0,
+        "net_5d": -2.65,
+        "net_1d": -5.3,
+        "net_20d": 31.8,
+        "change_5d_pct": 0.0,
+        "change_1d_pct": 0.0
+      }
+    ]
+  },
+  {
+    "group_name": "影像感測IC",
+    "stock_count": 4,
+    "matched": 3,
+    "net_5d": 92.287,
+    "net_1d": 104.624,
+    "net_20d": 1950.971,
+    "change_5d_pct": 0.0,
+    "change_1d_pct": 0.0,
+    "label": "輪動",
+    "stocks": [
+      {
+        "code": "3034",
+        "name": "聯詠",
+        "close_price": 480.5,
+        "net_5d": 168.3336,
+        "net_1d": 107.6849,
+        "net_20d": 2357.4051,
+        "change_5d_pct": 0.0,
+        "change_1d_pct": 0.0
+      },
+      {
+        "code": "8016",
+        "name": "矽創",
+        "close_price": 295.5,
+        "net_5d": -9.2373,
+        "net_1d": 24.819,
+        "net_20d": -334.8488,
+        "change_5d_pct": 0.0,
+        "change_1d_pct": 0.0
+      },
+      {
+        "code": "2401",
+        "name": "凌陽",
+        "close_price": 26.5,
+        "net_5d": -66.8089,
+        "net_1d": -27.8799,
+        "net_20d": -71.5858,
+        "change_5d_pct": 0.0,
+        "change_1d_pct": 0.0
+      }
+    ]
+  },
+  {
+    "group_name": "控制IC",
+    "stock_count": 4,
+    "matched": 2,
+    "net_5d": 39.638,
+    "net_1d": -5.517,
+    "net_20d": -144.81,
+    "change_5d_pct": 0.0,
+    "change_1d_pct": 0.0,
+    "label": "輪動",
+    "stocks": [
+      {
+        "code": "2459",
+        "name": "敦吉",
+        "close_price": 68.7,
+        "net_5d": 71.448,
+        "net_1d": -1.374,
+        "net_20d": 72.822,
+        "change_5d_pct": 0.0,
+        "change_1d_pct": 0.0
+      },
+      {
+        "code": "2458",
+        "name": "義隆",
+        "close_price": 161.0,
+        "net_5d": -31.8104,
+        "net_1d": -4.1425,
+        "net_20d": -217.6318,
+        "change_5d_pct": 0.0,
+        "change_1d_pct": 0.0
+      }
+    ]
+  },
+  {
+    "group_name": "電感器材料",
+    "stock_count": 5,
+    "matched": 2,
+    "net_5d": 36.747,
+    "net_1d": -1.374,
+    "net_20d": 50.178,
+    "change_5d_pct": 0.0,
+    "change_1d_pct": 0.0,
+    "label": "輪動",
+    "stocks": [
+      {
+        "code": "6155",
+        "name": "鈞寶",
+        "close_price": 80.7,
+        "net_5d": -34.701,
+        "net_1d": 0.0,
+        "net_20d": -22.6444,
+        "change_5d_pct": 0.0,
+        "change_1d_pct": 0.0
+      },
+      {
+        "code": "2459",
+        "name": "敦吉",
+        "close_price": 68.7,
+        "net_5d": 71.448,
+        "net_1d": -1.374,
+        "net_20d": 72.822,
+        "change_5d_pct": 0.0,
+        "change_1d_pct": 0.0
+      }
+    ]
+  },
+  {
+    "group_name": "電容器材料",
+    "stock_count": 4,
+    "matched": 1,
+    "net_5d": 15.004,
+    "net_1d": 88.0,
+    "net_20d": 3316.412,
+    "change_5d_pct": 0.0,
+    "change_1d_pct": 0.0,
+    "label": "輪動",
+    "stocks": [
+      {
+        "code": "2492",
+        "name": "華新科",
+        "close_price": 440.0,
+        "net_5d": 15.004,
+        "net_1d": 88.0,
+        "net_20d": 3316.412,
+        "change_5d_pct": 0.0,
+        "change_1d_pct": 0.0
+      }
+    ]
+  }
+]
