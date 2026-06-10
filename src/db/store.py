@@ -149,12 +149,18 @@ def has_institutional(trade_date: str) -> bool:
 
 
 def has_prices(trade_date: str) -> bool:
+    """今日收盤價是否已入庫（自適應閾值）"""
     td = _d(trade_date)
     with _conn() as c:
         n = c.execute(
             "SELECT COUNT(*) FROM stock_prices WHERE trade_date=?", (td,)
         ).fetchone()[0]
-    if n > 500:
+        mx_row = c.execute(
+            "SELECT MAX(cnt) FROM (SELECT COUNT(*) AS cnt FROM stock_prices GROUP BY trade_date)"
+        ).fetchone()[0]
+    mx = mx_row or 0
+    threshold = max(100, mx * 0.5) if mx else 500
+    if n >= threshold and n > 0:
         logger.info(f"[DB-CACHE] prices {td}: {n} rows")
         return True
     return False

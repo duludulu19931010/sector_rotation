@@ -36,16 +36,18 @@ from src.scrapers.etf  import (
 )
 from src.analysis.compute import (
     load_groups, compute_stock_stats, compute_group_stats, export_json,
+    init_stock_names,
 )
 
 # ── 設定 ──────────────────────────────────────────────
 
-DB_PATH   = ROOT / "db" / "market.db"
-DATA_DIR  = ROOT / "docs" / "assets" / "data"
-INPUT_CSV = ROOT / "input" / "Group.csv"
-LOG_FILE  = ROOT / "pipeline.log"
-TODAY     = date.today().strftime("%Y-%m-%d")
-TODAY_8   = date.today().strftime("%Y%m%d")
+DB_PATH        = ROOT / "db" / "market.db"
+DATA_DIR       = ROOT / "docs" / "assets" / "data"
+INPUT_CSV      = ROOT / "input" / "Group.csv"
+STOCK_LIST_CSV = ROOT / "input" / "stock_list.csv"
+LOG_FILE       = ROOT / "pipeline.log"
+TODAY          = date.today().strftime("%Y-%m-%d")
+TODAY_8        = date.today().strftime("%Y%m%d")
 
 logging.basicConfig(
     level=logging.INFO,
@@ -98,7 +100,7 @@ def step3_prices(force: bool = False) -> pd.DataFrame:
         log.info("  [CACHE HIT] reading from DB")
         return db.load_prices(TODAY)
 
-    df = fetch_all_prices()
+    df = fetch_all_prices(TODAY)   # ← 傳入 trade_date，df 內含 trade_date 欄位
     if df.empty:
         log.warning("  API returned nothing, using DB fallback")
         return db.load_prices()
@@ -303,6 +305,9 @@ def main():
 
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     db.init(DB_PATH)
+
+    # 載入股票名稱對照表（input/stock_list.csv，CP950）
+    init_stock_names(STOCK_LIST_CSV)
 
     groups = step1_groups()
 

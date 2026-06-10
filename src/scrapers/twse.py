@@ -7,6 +7,7 @@ TWSE / TPEx 官方 API 爬蟲
   上市收盤: https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_ALL
   上櫃收盤: https://www.tpex.org.tw/openapi/v1/tpex/exchangeReport/daily_close_quotes
            （TPEx 憑證缺 Subject Key Identifier → verify=False）
+  TPEx 備用: https://www.tpex.org.tw/openapi/v1/tpex/exchangeReport/companies_regular_trading_statistics
 """
 
 import logging
@@ -37,6 +38,8 @@ def _get(url: str, params: dict = None, verify: bool = True,
             r = requests.get(url, params=params, headers=_HEADERS,
                              timeout=25, verify=verify)
             r.raise_for_status()
+            if not r.text.strip():
+                raise ValueError("Empty response body")
             data = r.json()
             if isinstance(data, (dict, list)):
                 return data
@@ -57,10 +60,8 @@ def fetch_t86(date_str: str) -> pd.DataFrame:
 
     T86 欄位索引（TWSE 官方）：
       0: 股票代號  1: 股票名稱
-      2: 外資買進  3: 外資賣出  4: 外資淨買超
-      5: 投信買進  6: 投信賣出  7: 投信淨買超
-      8: 自營買進（自行）  9: 自營賣出（自行）  10: 自營淨買超（自行）
-      11: 自營買進（避險） 12: 自營賣出（避險） 13: 自營淨買超（避險）
+      4: 外資淨買超  7: 投信淨買超
+      10: 自營淨買超（自行）  13: 自營淨買超（避險）
       14: 三大法人合計淨買超
     """
     url    = "https://www.twse.com.tw/rwd/zh/fund/T86"
@@ -100,12 +101,12 @@ def fetch_t86_multi(days: int = 5,
     collected = 0
     offset    = 0
     today     = datetime.today()
-    max_offset = days * 2 + 15   # 涵蓋假日緩衝
+    max_offset = days * 2 + 15
 
     while collected < days and offset < max_offset:
         d = today - timedelta(days=offset)
         offset += 1
-        if d.weekday() >= 5:        # 週末跳過
+        if d.weekday() >= 5:
             continue
         ds = d.strftime("%Y%m%d")
         dd = d.strftime("%Y-%m-%d")
@@ -125,8 +126,11 @@ def fetch_t86_multi(days: int = 5,
 
 # ── 收盤價 ────────────────────────────────────────────
 
-def fetch_twse_prices() -> pd.DataFrame:
-    """上市全市場收盤（TWSE OpenAPI）"""
+def fetch_twse_prices(trade_date: str) -> pd.DataFrame:
+    """
+    上市全市場收盤（TWSE OpenAPI）
+    trade_date: YYYY-MM-DD（存入 df，供 compute_stock_stats 使用）
+    """
     data = _get("https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_ALL")
     if not data or not isinstance(data, list):
         return pd.DataFrame()
@@ -136,6 +140,7 @@ def fetch_twse_prices() -> pd.DataFrame:
         if not code:
             continue
         rows.append({
+            "trade_date":  trade_date,          # ← 關鍵：帶入 trade_date
             "code":        code.zfill(4),
             "name":        item.get("Name", ""),
             "market":      "TWSE",
@@ -150,20 +155,34 @@ def fetch_twse_prices() -> pd.DataFrame:
     return df
 
 
-def fetch_tpex_prices() -> pd.DataFrame:
-    """上櫃全市場收盤（TPEx OpenAPI，verify=False）"""
-    data = _get(
+def fetch_tpex_prices(trade_date: str) -> pd.DataFrame:
+    """
+    上櫃全市場收盤（TPEx OpenAPI，verify=False）
+    主要端點 + 備用端點
+    """
+    endpoints = [
         "https://www.tpex.org.tw/openapi/v1/tpex/exchangeReport/daily_close_quotes",
-        verify=False
-    )
+        "https://www.tpex.org.tw/openapi/v1/tpex/exchangeReport/companies_regular_trading_statistics",
+    ]
+    data = None
+    for ep in endpoints:
+        data = _get(ep, verify=False, retries=2, delay=1.0)
+        if data and isinstance(data, list) and len(data) > 0:
+            logger.info(f"TPEx prices from: {ep.split('/')[-1]}")
+            break
+
     if not data or not isinstance(data, list):
+        logger.warning("TPEx prices: all endpoints failed, skipping")
         return pd.DataFrame()
+
     rows = []
     for item in data:
-        code = str(item.get("SecuritiesCompanyCode", item.get("Code", ""))).strip()
+        code = str(item.get("SecuritiesCompanyCode",
+                   item.get("Code", ""))).strip()
         if not code:
             continue
         rows.append({
+            "trade_date":  trade_date,          # ← 關鍵：帶入 trade_date
             "code":        code.zfill(4),
             "name":        item.get("CompanyName", item.get("Name", "")),
             "market":      "TPEx",
@@ -178,10 +197,17 @@ def fetch_tpex_prices() -> pd.DataFrame:
     return df
 
 
-def fetch_all_prices() -> pd.DataFrame:
-    twse = fetch_twse_prices()
-    tpex = fetch_tpex_prices()
-    combined = pd.concat([twse, tpex], ignore_index=True)
+def fetch_all_prices(trade_date: str) -> pd.DataFrame:
+    """
+    抓取上市 + 上櫃收盤價，帶入 trade_date 欄位
+    trade_date: YYYY-MM-DD
+    """
+    twse = fetch_twse_prices(trade_date)
+    tpex = fetch_tpex_prices(trade_date)
+    frames = [f for f in [twse, tpex] if not f.empty]
+    if not frames:
+        return pd.DataFrame()
+    combined = pd.concat(frames, ignore_index=True)
     combined = combined.drop_duplicates(subset=["code"])
     logger.info(f"All prices: {len(combined)} rows (TWSE={len(twse)}, TPEx={len(tpex)})")
     return combined
