@@ -275,8 +275,10 @@ def db_save_price(df: pd.DataFrame, d: str) -> int:
 # ─────────────────────────────────────────────────────────
 def fetch_t86(date8: str) -> pd.DataFrame:
     """
-    TWSE T86 三大法人買賣超
+    TWSE T86 三大法人買賣超（上市股）
     欄位索引：0=代號 1=名稱 4=外資淨 7=投信淨 10=自營(自行)淨 13=自營(避險)淨 14=三大合計
+    單位：張（1張=1000股）
+    億元換算：張數 × 收盤價 × 1000 ÷ 1e8
     """
     data = _get("https://www.twse.com.tw/rwd/zh/fund/T86",
                 params={"response": "json", "date": date8, "selectType": "ALL"})
@@ -290,19 +292,83 @@ def fetch_t86(date8: str) -> pd.DataFrame:
             "date":  datetime.strptime(date8, "%Y%m%d").strftime("%Y-%m-%d"),
             "code":  str(row[0]).strip().zfill(4),
             "name":  str(row[1]).strip(),
-            "f_net": _int(row[4]),
-            "t_net": _int(row[7]),
-            "d_net": _int(row[10]) + _int(row[13]),
-            "total": _int(row[14]),
+            "f_net": _int(row[4]),    # 外資淨買超（張）
+            "t_net": _int(row[7]),    # 投信淨買超（張）
+            "d_net": _int(row[10]) + _int(row[13]),  # 自營合計（張）
+            "total": _int(row[14]),   # 三大法人合計（張）
         })
     df = pd.DataFrame(rows)
-    log.info(f"  T86 {date8}: {len(df)} rows")
+    log.info(f"  T86(TWSE) {date8}: {len(df)} rows")
     return df
+
+
+def fetch_tpex_inst(date8: str) -> pd.DataFrame:
+    """
+    TPEx 上櫃三大法人買賣超
+    端點：GET /tpex_mainboard_institutional_investors
+    或   GET /tpex/fund/daily_institutional_buying_selling
+
+    TPEx API 回傳欄位（依 OpenAPI 文件）：
+      代號、名稱、外資買進、外資賣出、外資淨買超、
+      投信買進、投信賣出、投信淨買超、
+      自營買進、自營賣出、自營淨買超、三大法人淨買超
+    單位：張（1張=1000股），與 TWSE T86 相同
+    """
+    dd = datetime.strptime(date8, "%Y%m%d").strftime("%Y-%m-%d")
+
+    for ep in [
+        "https://www.tpex.org.tw/openapi/v1/tpex_mainboard_institutional_investors",
+        "https://www.tpex.org.tw/openapi/v1/tpex/fund/daily_institutional_buying_selling",
+    ]:
+        data = _get(ep, verify=False, retries=2, delay=1.0)
+        if not data or not isinstance(data, list) or len(data) < 5:
+            continue
+
+        rows = []
+        for item in data:
+            # 嘗試不同的欄位名稱（TPEx API 欄位名稱因版本有差異）
+            code = str(item.get("SecuritiesCompanyCode",
+                        item.get("Code", item.get("code", "")))).strip()
+            if not code or not code.isdigit():
+                continue
+            # 三大法人合計淨買超（張）
+            # 可能的欄位名：NetBuy, NetBuySell, ThreeInstitutionalInvestorsNet, net_buy
+            total = (_int(item.get("NetBuy",
+                     item.get("NetBuySell",
+                     item.get("ThreeInstitutionalInvestorsNet",
+                     item.get("net_buy", 0))))))
+            # 也可能是分開計算
+            if total == 0:
+                f = _int(item.get("ForeignNetBuy",   item.get("foreign_net", 0)))
+                t = _int(item.get("TrustNetBuy",     item.get("trust_net",   0)))
+                d = _int(item.get("DealerNetBuy",    item.get("dealer_net",  0)))
+                total = f + t + d
+            rows.append({
+                "date":  dd,
+                "code":  code.zfill(4),
+                "name":  str(item.get("CompanyName",
+                              item.get("Name", item.get("name", "")))).strip(),
+                "f_net": _int(item.get("ForeignNetBuy",   item.get("foreign_net", 0))),
+                "t_net": _int(item.get("TrustNetBuy",     item.get("trust_net",   0))),
+                "d_net": _int(item.get("DealerNetBuy",    item.get("dealer_net",  0))),
+                "total": total,
+            })
+        if rows:
+            df = pd.DataFrame(rows)
+            log.info(f"  T86(TPEx) {date8}: {len(df)} rows (from {ep.split('/')[-1]})")
+            return df
+
+    log.warning(f"  TPEx inst {date8}: all endpoints failed or empty")
+    return pd.DataFrame()
 
 
 def fetch_inst_multiday(days: int = 20, skip_dates: set = None) -> pd.DataFrame:
     """
-    抓近 days 個交易日的 T86，已在 DB 的日期自動跳過
+    抓近 days 個交易日的三大法人資料（TWSE 上市 + TPEx 上櫃合併）
+    已在 DB 的日期自動跳過
+
+    TWSE T86：上市股，欄位 14 = 三大合計（張）
+    TPEx 法人：上櫃股，三大合計（張），與 TWSE 同單位
     """
     skip_dates = skip_dates or set()
     frames = []
@@ -313,19 +379,30 @@ def fetch_inst_multiday(days: int = 20, skip_dates: set = None) -> pd.DataFrame:
     while collected < days and offset < days * 2 + 20:
         d = today - timedelta(days=offset)
         offset += 1
-        if d.weekday() >= 5:          # 跳過週末
+        if d.weekday() >= 5:
             continue
         dd = d.strftime("%Y-%m-%d")
         d8 = d.strftime("%Y%m%d")
         if dd in skip_dates:
-            log.info(f"  SKIP T86 {dd} (already in DB)")
+            log.info(f"  SKIP inst {dd} (already in DB)")
             collected += 1
             continue
-        df = fetch_t86(d8)
-        if not df.empty:
-            frames.append(df)
-            collected += 1
-        time.sleep(0.5)               # 避免對 TWSE 過度請求
+
+        # TWSE 上市
+        twse_df = fetch_t86(d8)
+
+        # TPEx 上櫃（每次都嘗試，失敗不阻斷）
+        tpex_df = fetch_tpex_inst(d8)
+
+        if twse_df.empty and tpex_df.empty:
+            log.warning(f"  No inst data for {dd}, skipping")
+            continue
+
+        day_frames = [f for f in [twse_df, tpex_df] if not f.empty]
+        combined = pd.concat(day_frames, ignore_index=True).drop_duplicates(subset=["code"])
+        frames.append(combined)
+        collected += 1
+        time.sleep(0.5)
 
     return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
 
@@ -357,33 +434,46 @@ def fetch_twse_price(trade_date: str) -> pd.DataFrame:
 
 
 def fetch_tpex_price(trade_date: str) -> pd.DataFrame:
-    """上櫃收盤價（TPEx 憑證問題用 verify=False）"""
+    """
+    上櫃收盤價（TPEx OpenAPI，verify=False 因為 TPEx 憑證問題）
+    端點依序嘗試新舊版本，TradeVolume 是股數不是張數，僅作記錄用
+    """
     for ep in [
+        "https://www.tpex.org.tw/openapi/v1/tpex_mainboard_daily_close_quotes",
+        "https://www.tpex.org.tw/openapi/v1/tpex_mainboard_quotes",
         "https://www.tpex.org.tw/openapi/v1/tpex/exchangeReport/daily_close_quotes",
         "https://www.tpex.org.tw/openapi/v1/tpex/exchangeReport/companies_regular_trading_statistics",
     ]:
         data = _get(ep, verify=False, retries=2, delay=1.5)
-        if data and isinstance(data, list) and len(data) > 10:
-            rows = []
-            for item in data:
-                code = str(item.get("SecuritiesCompanyCode", item.get("Code", ""))).strip()
-                if not code:
-                    continue
-                rows.append({
-                    "date":   trade_date,
-                    "code":   code.zfill(4),
-                    "name":   item.get("CompanyName", item.get("Name", "")),
-                    "market": "TPEx",
-                    "close":  _flt(item.get("Close",  item.get("ClosingPrice"))),
-                    "open":   _flt(item.get("Open",   item.get("OpeningPrice"))),
-                    "high":   _flt(item.get("High",   item.get("HighestPrice"))),
-                    "low":    _flt(item.get("Low",    item.get("LowestPrice"))),
-                    "vol":    _int(item.get("TradeVolume")),
-                })
+        if not data or not isinstance(data, list) or len(data) < 5:
+            continue
+        rows = []
+        for item in data:
+            code = str(item.get("SecuritiesCompanyCode",
+                        item.get("Code", item.get("code","")))).strip()
+            if not code:
+                continue
+            close = _flt(item.get("Close",
+                          item.get("ClosingPrice",
+                          item.get("close", 0))))
+            if close <= 0:
+                continue
+            rows.append({
+                "date":   trade_date,
+                "code":   code.zfill(4),
+                "name":   item.get("CompanyName", item.get("Name", item.get("name",""))),
+                "market": "TPEx",
+                "close":  close,
+                "open":   _flt(item.get("Open",  item.get("OpeningPrice",  0))),
+                "high":   _flt(item.get("High",  item.get("HighestPrice",  0))),
+                "low":    _flt(item.get("Low",   item.get("LowestPrice",   0))),
+                "vol":    _int(item.get("TradeVolume", 0)),  # 股數，非張數
+            })
+        if rows:
             df = pd.DataFrame(rows)
             log.info(f"  TPEx price: {len(df)} rows (from {ep.split('/')[-1]})")
             return df
-    log.warning("  TPEx: all endpoints failed")
+    log.warning("  TPEx price: all endpoints failed")
     return pd.DataFrame()
 
 
