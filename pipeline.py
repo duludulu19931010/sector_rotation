@@ -206,6 +206,27 @@ def db_load_price(d: str = None) -> pd.DataFrame:
     return df
 
 
+def db_load_price_history(days: int = 7) -> pd.DataFrame:
+    """
+    讀取近 days 個有資料的交易日的收盤價（用於計算漲跌幅）
+    只取 date, code, close 三欄，節省記憶體
+    """
+    dates = db_price_dates()
+    if not dates:
+        return pd.DataFrame()
+    recent = dates[:days]   # db_price_dates 已按日期倒序排列
+    ph = ",".join("?" * len(recent))
+    with db_conn() as c:
+        df = pd.read_sql_query(
+            f"SELECT date, code, close FROM price WHERE date IN ({ph}) ORDER BY date",
+            c, params=recent
+        )
+    if not df.empty:
+        df["code"] = df["code"].astype(str).str.zfill(4)
+        log.info(f"  Loaded price history: {len(df)} rows, dates={sorted(df['date'].unique())}")
+    return df
+
+
 def db_save_inst(df: pd.DataFrame) -> int:
     if df is None or df.empty:
         return 0
@@ -429,6 +450,10 @@ def compute(inst_df: pd.DataFrame,
     """
     計算族群資金流向指標
 
+    inst_df   = 近 20 日三大法人資料（DB 讀取）
+    price_df  = 今日收盤價（STOCK_DAY_ALL 回傳，含 date 欄位）
+    漲跌幅用  db_load_price_history() 取歷史收盤價計算
+
     回傳：
       records   族群層級 list[dict]
       details   {族群名: [個股 dict, ...]}
@@ -442,49 +467,63 @@ def compute(inst_df: pd.DataFrame,
     inst["code"]  = inst["code"].astype(str).str.zfill(4)
     price["code"] = price["code"].astype(str).str.zfill(4)
 
-    inst_dates  = sorted(inst["date"].unique())
-    price_dates = sorted(price["date"].unique())
+    inst_dates = sorted(inst["date"].unique())
     log.info(f"  inst 日期範圍: {inst_dates[0]} ~ {inst_dates[-1]} ({len(inst_dates)} 天)")
-    log.info(f"  price 最新日: {price_dates[-1]}")
 
-    # ── 近 5 日 / 近 20 日 inst ─────────────────────────
-    last5  = set(inst_dates[-5:])
-    last20 = set(inst_dates)        # load_inst 已限制最多 20 日
+    # ── 今日收盤價 ───────────────────────────────────────
+    latest_price_date = sorted(price["date"].unique())[-1]
+    p_now  = price[price["date"] == latest_price_date].set_index("code")
+    close  = p_now["close"]
+    log.info(f"  price 最新日: {latest_price_date}, {len(close)} stocks")
+
+    # ── 歷史收盤價（從 DB 取，用於計算漲跌幅）───────────
+    # 每天 step_price 都會把當日收盤存進 DB，所以 DB 有多天歷史
+    price_hist = db_load_price_history(days=7)
+
+    if price_hist.empty:
+        log.warning("  DB 無歷史收盤價，漲跌幅為 0（明日起正常計算）")
+        # 今日當基準，算出來全是 0，但不崩潰
+        price_hist = price[["date","code","close"]].copy()
+
+    hist_dates = sorted(price_hist["date"].unique())
+    log.info(f"  price history dates: {hist_dates}")
+
+    # 五日前 / 昨日
+    p5_date = hist_dates[-5] if len(hist_dates) >= 5 else hist_dates[0]
+    p1_date = hist_dates[-2] if len(hist_dates) >= 2 else hist_dates[0]
+    p5 = price_hist[price_hist["date"] == p5_date].set_index("code")["close"]
+    p1 = price_hist[price_hist["date"] == p1_date].set_index("code")["close"]
+    log.info(f"  chg_1d 基準: {p1_date}, chg_5d 基準: {p5_date}")
+
+    # ── inst 聚合 ────────────────────────────────────────
+    last5 = set(inst_dates[-5:])
     latest_inst_date = inst_dates[-1]
 
     agg_1d  = inst[inst["date"] == latest_inst_date].groupby("code")["total"].sum()
     agg_5d  = inst[inst["date"].isin(last5)].groupby("code")["total"].sum()
     agg_20d = inst.groupby("code")["total"].sum()
 
-    # ── 最新收盤價 ───────────────────────────────────────
-    latest_price_date = price_dates[-1]
-    p_now   = price[price["date"] == latest_price_date].set_index("code")
-
-    # ── 五日前 / 昨日收盤（漲幅用）───────────────────────
-    p5_date = price_dates[-5] if len(price_dates) >= 5 else price_dates[0]
-    p1_date = price_dates[-2] if len(price_dates) >= 2 else price_dates[0]
-    p5 = price[price["date"] == p5_date].set_index("code")["close"]
-    p1 = price[price["date"] == p1_date].set_index("code")["close"]
-
-    # ── 個股統計 ─────────────────────────────────────────
-    codes = p_now.index
-    close = p_now["close"]
+    codes = close.index
 
     # 億元換算：張數 × 收盤價 × 1000股 ÷ 1e8
-    def to_yi(agg, close_s):
-        merged = agg.reindex(close_s.index, fill_value=0)
-        return (merged * close_s * 1000 / 1e8).round(4)
+    def to_yi(agg: pd.Series, close_s: pd.Series) -> pd.Series:
+        return (agg.reindex(close_s.index, fill_value=0) * close_s * 1000 / 1e8).round(4)
 
     net_1d  = to_yi(agg_1d,  close)
     net_5d  = to_yi(agg_5d,  close)
     net_20d = to_yi(agg_20d, close)
 
-    chg_1d = ((close - p1.reindex(codes, fill_value=np.nan)) /
-               p1.reindex(codes, fill_value=np.nan) * 100).round(2)
-    chg_5d = ((close - p5.reindex(codes, fill_value=np.nan)) /
-               p5.reindex(codes, fill_value=np.nan) * 100).round(2)
+    # 漲跌幅：(今收 - 基準收) / 基準收 × 100
+    def pct_chg(base: pd.Series) -> pd.Series:
+        b = base.reindex(codes, fill_value=np.nan)
+        valid = b.notna() & (b > 0)
+        result = pd.Series(np.nan, index=codes)
+        result[valid] = ((close[valid] - b[valid]) / b[valid] * 100).round(2)
+        return result
 
-    # 取得名稱：優先 stock_list.csv，再 API 名稱
+    chg_1d = pct_chg(p1)
+    chg_5d = pct_chg(p5)
+
     api_names = p_now["name"].to_dict()
     def get_name(code: str) -> str:
         return name_map.get(code, "") or api_names.get(code, "")
@@ -497,23 +536,21 @@ def compute(inst_df: pd.DataFrame,
         codes_set = {str(c).zfill(4) for c in raw_codes}
         matched   = [c for c in codes_set if c in close.index]
 
-        # 個股明細
         stocks = []
         for c in matched:
-            c1d = float(chg_1d.get(c, 0) or 0)
-            c5d = float(chg_5d.get(c, 0) or 0)
-            # 台股漲跌停約 ±10%，超出視為資料異常，歸零
-            if abs(c1d) > 11:
-                c1d = 0.0
+            c1d = float(chg_1d.get(c, np.nan))
+            c5d = float(chg_5d.get(c, np.nan))
+            if np.isnan(c1d) or abs(c1d) > 11: c1d = 0.0   # 台股漲跌停 ±10%
+            if np.isnan(c5d): c5d = 0.0
             stocks.append({
                 "code":    c,
                 "name":    get_name(c),
-                "close":   float(close.get(c, 0)),
-                "net_1d":  float(net_1d.get(c, 0)),
-                "net_5d":  float(net_5d.get(c, 0)),
-                "net_20d": float(net_20d.get(c, 0)),
-                "chg_1d":  c1d,
-                "chg_5d":  float(chg_5d.get(c, 0) or 0),
+                "close":   round(float(close.get(c, 0)), 2),
+                "net_1d":  round(float(net_1d.get(c, 0)), 4),
+                "net_5d":  round(float(net_5d.get(c, 0)), 4),
+                "net_20d": round(float(net_20d.get(c, 0)), 4),
+                "chg_1d":  round(c1d, 2),
+                "chg_5d":  round(c5d, 2),
             })
         stocks.sort(key=lambda x: x["net_1d"], reverse=True)
         details[gname] = stocks
@@ -526,11 +563,15 @@ def compute(inst_df: pd.DataFrame,
             })
             continue
 
+        def gmean(s: pd.Series, idx: list) -> float:
+            vals = s.reindex(idx).dropna()
+            return round(float(vals.mean()), 2) if not vals.empty else 0.0
+
         g_net_1d  = round(float(net_1d.reindex(matched, fill_value=0).sum()),  3)
         g_net_5d  = round(float(net_5d.reindex(matched, fill_value=0).sum()),  3)
         g_net_20d = round(float(net_20d.reindex(matched, fill_value=0).sum()), 3)
-        g_chg_1d  = round(float(chg_1d.reindex(matched, fill_value=0).mean()), 2)
-        g_chg_5d  = round(float(chg_5d.reindex(matched, fill_value=0).mean()), 2)
+        g_chg_1d  = gmean(chg_1d, matched)
+        g_chg_5d  = gmean(chg_5d, matched)
 
         if   g_net_5d >  2 and g_chg_5d > 1:  label = "主力"
         elif g_net_5d >  0 and g_chg_5d <= 1: label = "輪動"
@@ -549,17 +590,13 @@ def compute(inst_df: pd.DataFrame,
             "label":   label,
         })
 
-    log.info(f"  Groups computed: {len(records)}, "
+    log.info(f"  Groups: {len(records)}, "
              f"主力={sum(1 for r in records if r['label']=='主力')}, "
              f"輪動={sum(1 for r in records if r['label']=='輪動')}, "
              f"退潮={sum(1 for r in records if r['label']=='退潮')}, "
              f"觀望={sum(1 for r in records if r['label']=='觀望')}")
     return records, details
 
-
-# ─────────────────────────────────────────────────────────
-#  JSON 輸出
-# ─────────────────────────────────────────────────────────
 def export_json(records: list[dict], details: dict[str, list[dict]]) -> None:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
 
