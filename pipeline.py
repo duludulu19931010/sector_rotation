@@ -286,17 +286,22 @@ def fetch_tpex_price_today() -> dict[str, dict]:
 def fetch_tpex_price_hist(date8: str) -> dict[str, dict]:
     yy = int(date8[:4]) - 1911
     mm = date8[4:6]
+    dd = date8[6:8]
     data = _get(
         "https://www.tpex.org.tw/web/stock/aftertrading/daily_close_quotes/stk_quote_result.php",
-        params={"l": "zh-tw", "d": f"{yy}/{mm}", "se": "EW"},
+        params={"l": "zh-tw", "d": f"{yy}/{mm}/{dd}", "se": "EW"},
         headers=TPEX_HEADERS, verify=False,
     )
     if not isinstance(data, dict):
+        log.warning(f"TPEx price (hist) {date8}: unexpected response type")
         return {}
-    target_dd = f"{yy}/{date8[4:6]}/{date8[6:8]}"
+    aa = data.get("aaData", [])
+    if not aa:
+        log.warning(f"TPEx price (hist) {date8}: aaData empty")
+        return {}
     result = {}
-    for row in data.get("aaData", []):
-        if len(row) < 8:
+    for row in aa:
+        if len(row) < 9:
             continue
         code = str(row[0]).strip().zfill(4)
         if not code.strip("0"):
