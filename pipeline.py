@@ -25,10 +25,15 @@ LOG_FILE  = ROOT / "pipeline.log"
 TODAY     = date.today().strftime("%Y-%m-%d")
 TODAY_8   = date.today().strftime("%Y%m%d")
 
-HEADERS = {
+TWSE_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
     "Accept":     "application/json, text/plain, */*",
     "Referer":    "https://www.twse.com.tw/",
+}
+TPEX_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+    "Accept":     "application/json, text/plain, */*",
+    "Referer":    "https://www.tpex.org.tw/",
 }
 
 logging.basicConfig(
@@ -86,7 +91,7 @@ def db_init():
     log.info(f"DB ready: {DB_FILE}")
 
 
-def db_trade_dates(n: int = 30) -> list[str]:
+def db_dates(n: int = 30) -> list[str]:
     with _db() as c:
         rows = c.execute(
             "SELECT date, COUNT(*) AS cnt FROM daily GROUP BY date ORDER BY date DESC"
@@ -99,12 +104,12 @@ def db_trade_dates(n: int = 30) -> list[str]:
 
 
 def db_has_today() -> bool:
-    dates = db_trade_dates(1)
+    dates = db_dates(1)
     return bool(dates) and dates[0] == TODAY
 
 
 def db_load(days: int = 21) -> pd.DataFrame:
-    dates = db_trade_dates(days)
+    dates = db_dates(days)
     if not dates:
         return pd.DataFrame()
     ph = ",".join("?" * len(dates))
@@ -143,11 +148,12 @@ def db_save(df: pd.DataFrame) -> int:
     return len(rows)
 
 
-def _get(url: str, params: dict = None, verify: bool = True,
-         retries: int = 3, delay: float = 2.0) -> dict | list | None:
+def _get(url: str, params: dict = None, headers: dict = None,
+         verify: bool = True, retries: int = 3, delay: float = 2.0):
+    h = headers or TWSE_HEADERS
     for i in range(retries):
         try:
-            r = requests.get(url, params=params, headers=HEADERS,
+            r = requests.get(url, params=params, headers=h,
                              timeout=30, verify=verify)
             r.raise_for_status()
             if not r.text.strip():
@@ -162,7 +168,27 @@ def _get(url: str, params: dict = None, verify: bool = True,
     return None
 
 
-def fetch_twse_price() -> dict[str, dict]:
+def _to_date(d8: str) -> str:
+    return f"{d8[:4]}-{d8[4:6]}-{d8[6:8]}"
+
+
+def _flt(v) -> float:
+    try:    return float(str(v).replace(",", "").strip())
+    except: return 0.0
+
+
+def _int(v) -> int:
+    try:    return int(str(v).replace(",", "").strip())
+    except: return 0
+
+
+def _calc_net_yi(volume: int, value: int, inst_net: int) -> float:
+    if value == 0 or volume == 0:
+        return 0.0
+    return round((volume / value) * inst_net * 1000, 6)
+
+
+def fetch_twse_price_today() -> dict[str, dict]:
     data = _get("https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_ALL")
     if not isinstance(data, list):
         return {}
@@ -180,13 +206,43 @@ def fetch_twse_price() -> dict[str, dict]:
             "volume": _int(item.get("TradeVolume")),
             "value":  _int(item.get("TradeValue")),
         }
-    log.info(f"TWSE price: {len(result)} stocks")
+    log.info(f"TWSE price (today): {len(result)} stocks")
+    return result
+
+
+def fetch_twse_price_hist(date8: str) -> dict[str, dict]:
+    data = _get(
+        "https://www.twse.com.tw/rwd/zh/afterTrading/STOCK_DAY_ALL",
+        params={"response": "json", "date": date8},
+    )
+    if not isinstance(data, dict) or data.get("stat") != "OK":
+        return {}
+    fields = data.get("fields", [])
+    result = {}
+    for row in data.get("data", []):
+        if len(row) < 9:
+            continue
+        code = str(row[0]).strip().zfill(4)
+        if not code.strip("0"):
+            continue
+        result[code] = {
+            "name":   str(row[1]).strip(),
+            "volume": _int(row[2]),
+            "value":  _int(row[4]),
+            "open":   _flt(row[5]),
+            "high":   _flt(row[6]),
+            "low":    _flt(row[7]),
+            "close":  _flt(row[8]),
+        }
+    log.info(f"TWSE price (hist) {date8}: {len(result)} stocks")
     return result
 
 
 def fetch_twse_t86(date8: str) -> dict[str, int]:
-    data = _get("https://www.twse.com.tw/rwd/zh/fund/T86",
-                params={"response": "json", "date": date8, "selectType": "ALL"})
+    data = _get(
+        "https://www.twse.com.tw/rwd/zh/fund/T86",
+        params={"response": "json", "date": date8, "selectType": "ALL"},
+    )
     if not isinstance(data, dict) or data.get("stat") != "OK":
         return {}
     result = {}
@@ -198,9 +254,11 @@ def fetch_twse_t86(date8: str) -> dict[str, int]:
     return result
 
 
-def fetch_tpex_price() -> dict[str, dict]:
-    data = _get("https://www.tpex.org.tw/openapi/v1/tpex_mainboard_quotes",
-                verify=False)
+def fetch_tpex_price_today() -> dict[str, dict]:
+    data = _get(
+        "https://www.tpex.org.tw/openapi/v1/tpex_mainboard_quotes",
+        headers=TPEX_HEADERS, verify=False,
+    )
     if not isinstance(data, list) or len(data) < 5:
         log.warning("TPEx price: no data")
         return {}
@@ -221,13 +279,46 @@ def fetch_tpex_price() -> dict[str, dict]:
             "volume": _int(item.get("TradeVolume", 0)),
             "value":  _int(item.get("TradeValue",  0)),
         }
-    log.info(f"TPEx price: {len(result)} stocks")
+    log.info(f"TPEx price (today): {len(result)} stocks")
+    return result
+
+
+def fetch_tpex_price_hist(date8: str) -> dict[str, dict]:
+    yy = int(date8[:4]) - 1911
+    mm = date8[4:6]
+    data = _get(
+        "https://www.tpex.org.tw/web/stock/aftertrading/daily_close_quotes/stk_quote_result.php",
+        params={"l": "zh-tw", "d": f"{yy}/{mm}", "se": "EW"},
+        headers=TPEX_HEADERS, verify=False,
+    )
+    if not isinstance(data, dict):
+        return {}
+    target_dd = f"{yy}/{date8[4:6]}/{date8[6:8]}"
+    result = {}
+    for row in data.get("aaData", []):
+        if len(row) < 8:
+            continue
+        code = str(row[0]).strip().zfill(4)
+        if not code.strip("0"):
+            continue
+        result[code] = {
+            "name":   str(row[1]).strip(),
+            "close":  _flt(row[2]),
+            "open":   _flt(row[4]),
+            "high":   _flt(row[5]),
+            "low":    _flt(row[6]),
+            "volume": _int(row[8]),
+            "value":  _int(row[9]) if len(row) > 9 else 0,
+        }
+    log.info(f"TPEx price (hist) {date8}: {len(result)} stocks")
     return result
 
 
 def fetch_tpex_inst() -> dict[str, int]:
-    data = _get("https://www.tpex.org.tw/openapi/v1/tpex_3insti_daily_trading",
-                verify=False)
+    data = _get(
+        "https://www.tpex.org.tw/openapi/v1/tpex_3insti_daily_trading",
+        headers=TPEX_HEADERS, verify=False,
+    )
     if not isinstance(data, list) or len(data) < 5:
         log.warning("TPEx 3insti: no data")
         return {}
@@ -236,9 +327,9 @@ def fetch_tpex_inst() -> dict[str, int]:
         code = str(item.get("SecuritiesCompanyCode", "")).strip().zfill(4)
         if not code.strip("0"):
             continue
-        foreign = _int(item.get("ForeignInvestorsBuy",   0)) - _int(item.get("ForeignInvestorsSell",   0))
-        trust   = _int(item.get("InvestmentTrustBuy",    0)) - _int(item.get("InvestmentTrustSell",    0))
-        dealer  = _int(item.get("DealersBuy",            0)) - _int(item.get("DealersSell",            0))
+        foreign = _int(item.get("ForeignInvestorsBuy",  0)) - _int(item.get("ForeignInvestorsSell",  0))
+        trust   = _int(item.get("InvestmentTrustBuy",   0)) - _int(item.get("InvestmentTrustSell",   0))
+        dealer  = _int(item.get("DealersBuy",           0)) - _int(item.get("DealersSell",           0))
         total   = foreign + trust + dealer
         if total == 0:
             total = _int(item.get("TotalNetBuySell", item.get("NetBuySell", 0)))
@@ -247,17 +338,36 @@ def fetch_tpex_inst() -> dict[str, int]:
     return result
 
 
-def _calc_net_yi(volume: int, value: int, inst_net: int) -> float:
-    if value == 0 or volume == 0:
-        return 0.0
-    return round((volume / value) * inst_net * 1000, 6)
+def build_day_df(trade_date: str,
+                 twse_price: dict, twse_inst: dict,
+                 tpex_price: dict, tpex_inst: dict) -> pd.DataFrame:
+    rows = []
+    for code, p in twse_price.items():
+        inst = twse_inst.get(code, 0)
+        rows.append({
+            "date": trade_date, "code": code, "market": "TWSE", "name": p["name"],
+            "open_price": p["open"],   "close_price": p["close"],
+            "high_price": p["high"],   "low_price":   p["low"],
+            "trade_volume": p["volume"], "trade_value": p["value"],
+            "inst_net": inst, "net_yi": _calc_net_yi(p["volume"], p["value"], inst),
+        })
+    for code, p in tpex_price.items():
+        inst = tpex_inst.get(code, 0)
+        rows.append({
+            "date": trade_date, "code": code, "market": "TPEx", "name": p["name"],
+            "open_price": p["open"],   "close_price": p["close"],
+            "high_price": p["high"],   "low_price":   p["low"],
+            "trade_volume": p["volume"], "trade_value": p["value"],
+            "inst_net": inst, "net_yi": _calc_net_yi(p["volume"], p["value"], inst),
+        })
+    return pd.DataFrame(rows)
 
 
 def fetch_today() -> pd.DataFrame:
     with ThreadPoolExecutor(max_workers=4) as pool:
-        f_twse_p = pool.submit(fetch_twse_price)
+        f_twse_p = pool.submit(fetch_twse_price_today)
         f_twse_i = pool.submit(fetch_twse_t86, TODAY_8)
-        f_tpex_p = pool.submit(fetch_tpex_price)
+        f_tpex_p = pool.submit(fetch_tpex_price_today)
         f_tpex_i = pool.submit(fetch_tpex_inst)
 
     r_twse_p = f_twse_p.result()
@@ -267,32 +377,33 @@ def fetch_today() -> pd.DataFrame:
 
     log.info(f"Parallel done: TWSE {len(r_twse_p)} price/{len(r_twse_i)} inst "
              f"| TPEx {len(r_tpex_p)} price/{len(r_tpex_i)} inst")
+    return build_day_df(TODAY, r_twse_p, r_twse_i, r_tpex_p, r_tpex_i)
 
-    rows = []
-    for code, p in r_twse_p.items():
-        inst = r_twse_i.get(code, 0)
-        rows.append({
-            "date": TODAY, "code": code, "market": "TWSE", "name": p["name"],
-            "open_price": p["open"],   "close_price": p["close"],
-            "high_price": p["high"],   "low_price":   p["low"],
-            "trade_volume": p["volume"], "trade_value": p["value"],
-            "inst_net": inst, "net_yi": _calc_net_yi(p["volume"], p["value"], inst),
-        })
-    for code, p in r_tpex_p.items():
-        inst = r_tpex_i.get(code, 0)
-        rows.append({
-            "date": TODAY, "code": code, "market": "TPEx", "name": p["name"],
-            "open_price": p["open"],   "close_price": p["close"],
-            "high_price": p["high"],   "low_price":   p["low"],
-            "trade_volume": p["volume"], "trade_value": p["value"],
-            "inst_net": inst, "net_yi": _calc_net_yi(p["volume"], p["value"], inst),
-        })
 
-    df = pd.DataFrame(rows)
-    twse_n = sum(1 for r in rows if r["market"] == "TWSE")
-    tpex_n = sum(1 for r in rows if r["market"] == "TPEx")
-    log.info(f"Today total: {len(df)} stocks (TWSE={twse_n}, TPEx={tpex_n})")
-    return df
+def fetch_history(missing_dates: list[str]) -> pd.DataFrame:
+    frames = []
+    for dd in missing_dates:
+        d8 = dd.replace("-", "")
+        twse_p = fetch_twse_price_hist(d8)
+        twse_i = fetch_twse_t86(d8)
+        tpex_p = fetch_tpex_price_hist(d8)
+        tpex_i = {}
+        day_df = build_day_df(dd, twse_p, twse_i, tpex_p, tpex_i)
+        if not day_df.empty:
+            frames.append(day_df)
+        time.sleep(0.5)
+    return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
+
+
+def get_recent_trade_dates(n: int = 21) -> list[str]:
+    dates = []
+    d = date.today()
+    while len(dates) < n:
+        if d.weekday() < 5:
+            dates.append(d.strftime("%Y-%m-%d"))
+        d -= timedelta(days=1)
+    dates.sort()
+    return dates
 
 
 def compute(hist_df: pd.DataFrame,
@@ -321,7 +432,7 @@ def compute(hist_df: pd.DataFrame,
     close_now = close_pv[latest].dropna() if latest in close_pv.columns else pd.Series(dtype=float)
 
     def pct(base_date: str) -> pd.Series:
-        if base_date not in close_pv.columns:
+        if base_date not in close_pv.columns or base_date == latest:
             return pd.Series(0.0, index=close_now.index)
         base = close_pv[base_date]
         c    = close_now.reindex(base.index)
@@ -340,7 +451,7 @@ def compute(hist_df: pd.DataFrame,
     net_20d = net_pv[[c for c in last20 if c in net_pv.columns]].sum(axis=1)
 
     db_names = df[df["date"] == latest].set_index("code")["name"].to_dict()
-    def name(code: str) -> str:
+    def get_name(code: str) -> str:
         return name_map.get(code, "") or db_names.get(code, "")
 
     records: list[dict] = []
@@ -357,7 +468,7 @@ def compute(hist_df: pd.DataFrame,
                 c1 = 0.0
             stocks.append({
                 "code":    c,
-                "name":    name(c),
+                "name":    get_name(c),
                 "close":   round(float(close_now.get(c, 0)), 2),
                 "net_1d":  round(float(net_1d.get(c,  0) or 0), 4),
                 "net_5d":  round(float(net_5d.get(c,  0) or 0), 4),
@@ -442,6 +553,15 @@ def export_json(records, details, trade_date: str = TODAY) -> None:
     log.info(f"JSON: bubble={len(bubble)}, inflow={len(inflow)}, stealth={len(stealth)}")
 
 
+def export_csv() -> None:
+    hist = db_load(days=999)
+    if hist.empty:
+        return
+    csv_path = DATA_DIR / "market_data.csv"
+    hist.to_csv(csv_path, index=False, encoding="utf-8-sig")
+    log.info(f"CSV exported: {csv_path} ({len(hist)} rows)")
+
+
 def _jdump(fname: str, data):
     with open(DATA_DIR / fname, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
@@ -474,16 +594,6 @@ def load_names() -> dict[str, str]:
     return nm
 
 
-def _flt(v) -> float:
-    try:    return float(str(v).replace(",", "").strip())
-    except: return 0.0
-
-
-def _int(v) -> int:
-    try:    return int(str(v).replace(",", "").strip())
-    except: return 0
-
-
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--force",   action="store_true")
@@ -503,14 +613,24 @@ def main():
     name_map = load_names()
 
     if not args.dry_run:
-        if not args.force and db_has_today():
-            log.info("[CACHE] Today already in DB")
-        else:
+        have = set(db_dates(25))
+        need = get_recent_trade_dates(21)
+        missing = [d for d in need if d not in have and d != TODAY]
+
+        if missing:
+            log.info(f"Fetching {len(missing)} historical dates: {missing[0]} ~ {missing[-1]}")
+            hist_df = fetch_history(missing)
+            if not hist_df.empty:
+                db_save(hist_df)
+
+        if args.force or not db_has_today():
             today_df = fetch_today()
             if not today_df.empty:
                 db_save(today_df)
             else:
-                log.warning("No data fetched today")
+                log.warning("No data fetched today (API may not be available yet)")
+        else:
+            log.info("[CACHE] Today already in DB")
 
     hist = db_load(days=21)
     if hist.empty:
@@ -519,6 +639,7 @@ def main():
 
     records, details = compute(hist, groups, name_map)
     export_json(records, details, hist["date"].max())
+    export_csv()
 
     with _db() as c:
         total = c.execute("SELECT COUNT(*) FROM daily").fetchone()[0]
