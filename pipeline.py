@@ -139,7 +139,9 @@ def db_save(df: pd.DataFrame) -> int:
 def _finmind_token() -> str:
     token = os.environ.get("FINMIND_TOKEN", "")
     if not token:
-        log.warning("FINMIND_TOKEN not set, using anonymous access (rate limited)")
+        log.error("FINMIND_TOKEN is not set. Set it with: $env:FINMIND_TOKEN='your_token'")
+        log.error("Get a free token at https://finmindtrade.com")
+        raise SystemExit(1)
     return token
 
 
@@ -153,13 +155,15 @@ def _fm_get(dataset: str, start_date: str, end_date: str,
     }
     if stock_id:
         params["data_id"] = stock_id
-    headers = {}
-    if token:
-        headers["Authorization"] = f"Bearer {token}"
+    headers = {"Authorization": f"Bearer {token}"}
 
     for i in range(retries):
         try:
             r = requests.get(FINMIND_URL, params=params, headers=headers, timeout=60)
+            if r.status_code == 400:
+                log.error(f"FinMind 400 Bad Request: {r.text[:200]}")
+                log.error(f"  dataset={dataset}, start={start_date}, end={end_date}")
+                return pd.DataFrame()
             r.raise_for_status()
             body = r.json()
             if body.get("status") != 200:
@@ -172,10 +176,13 @@ def _fm_get(dataset: str, start_date: str, end_date: str,
                 return pd.DataFrame()
             data = body.get("data", [])
             if not data:
+                log.warning(f"FinMind {dataset}: empty data for {start_date}~{end_date}")
                 return pd.DataFrame()
             df = pd.DataFrame(data)
             log.info(f"FinMind {dataset}: {len(df)} rows ({start_date} ~ {end_date})")
             return df
+        except SystemExit:
+            raise
         except Exception as e:
             log.warning(f"FinMind GET [{i+1}/{retries}] {dataset}: {e}")
             if i < retries - 1:
