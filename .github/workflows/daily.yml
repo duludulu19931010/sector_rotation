@@ -1,0 +1,87 @@
+name: Daily Market Update
+
+on:
+  schedule:
+    - cron: "30 10 * * 1-5"
+  workflow_dispatch:
+    inputs:
+      force:
+        description: "強制重新抓取"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+jobs:
+  update:
+    name: Fetch & Compute
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          persist-credentials: true
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt -q
+
+      - name: Run pipeline
+        run: |
+          if [ "${{ github.event.inputs.force }}" = "true" ]; then
+            python pipeline.py --force
+          else
+            python pipeline.py
+          fi
+
+      - name: Verify outputs
+        run: |
+          for f in \
+            docs/assets/data/bubble_data.json \
+            docs/assets/data/inflow_low_gain.json \
+            docs/assets/data/stealth_accumulation.json \
+            docs/assets/data/metadata.json \
+            db/market.db; do
+            if [ -f "$f" ]; then
+              echo "OK  $f  ($(wc -c < "$f") bytes)"
+            else
+              echo "MISSING  $f"; exit 1
+            fi
+          done
+
+      - name: Commit & push
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add docs/assets/data/ db/market.db
+          if git diff --staged --quiet; then
+            echo "Nothing to commit"
+          else
+            git commit -m "data: $(date '+%Y-%m-%d %H:%M')"
+            git push
+          fi
+
+  deploy:
+    name: Deploy GitHub Pages
+    needs: update
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: docs/
+      - id: deploy
+        uses: actions/deploy-pages@v4
