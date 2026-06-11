@@ -953,7 +953,7 @@ def _diagnose_tpex():
     print("=" * 60)
 
 
-
+def main():
     ap = argparse.ArgumentParser(description="TW$FLOW Daily Pipeline")
     ap.add_argument("--force",     action="store_true", help="忽略快取，強制重新抓取")
     ap.add_argument("--dry-run",   action="store_true", help="只從 DB 重算 JSON")
