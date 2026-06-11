@@ -9,6 +9,10 @@ on:
         description: "強制重新抓取"
         type: boolean
         default: false
+      reset_history:
+        description: "重新補抓歷史（清除 TPEx=0 的日期）"
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -18,7 +22,11 @@ permissions:
 jobs:
   update:
     name: Fetch & Compute
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
+
+    defaults:
+      run:
+        shell: powershell
 
     steps:
       - uses: actions/checkout@v4
@@ -26,47 +34,56 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
           persist-credentials: true
 
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
+      - name: Verify Python
+        run: |
+          $v = python --version 2>&1
+          Write-Host "Python: $v"
+          if ($v -notmatch "3\.") { Write-Error "Python 3 not found"; exit 1 }
 
       - name: Install dependencies
-        run: pip install -r requirements.txt -q
+        run: python -m pip install -r requirements.txt -q
 
       - name: Run pipeline
+        env:
+          PYTHONIOENCODING: utf-8
         run: |
-          if [ "${{ github.event.inputs.force }}" = "true" ]; then
-            python pipeline.py --force
-          else
+          $flags = @()
+          if ("${{ github.event.inputs.force }}" -eq "true")         { $flags += "--force" }
+          if ("${{ github.event.inputs.reset_history }}" -eq "true") { $flags += "--reset-history" }
+          if ($flags.Count -gt 0) {
+            python pipeline.py @flags
+          } else {
             python pipeline.py
-          fi
+          }
 
       - name: Verify outputs
         run: |
-          for f in \
-            docs/assets/data/bubble_data.json \
-            docs/assets/data/inflow_low_gain.json \
-            docs/assets/data/stealth_accumulation.json \
-            docs/assets/data/metadata.json \
-            db/market.db; do
-            if [ -f "$f" ]; then
-              echo "OK  $f  ($(wc -c < "$f") bytes)"
-            else
-              echo "MISSING  $f"; exit 1
-            fi
-          done
+          $files = @(
+            "docs\assets\data\bubble_data.json",
+            "docs\assets\data\inflow_low_gain.json",
+            "docs\assets\data\stealth_accumulation.json",
+            "docs\assets\data\metadata.json",
+            "db\market.db"
+          )
+          $ok = $true
+          foreach ($f in $files) {
+            if (Test-Path $f) { Write-Host "OK  $f  ($((Get-Item $f).Length) bytes)" }
+            else { Write-Host "MISSING  $f"; $ok = $false }
+          }
+          if (-not $ok) { exit 1 }
 
       - name: Commit & push
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add docs/assets/data/ db/market.db
-          if git diff --staged --quiet; then
-            echo "Nothing to commit"
-          else
-            git commit -m "data: $(date '+%Y-%m-%d %H:%M')"
+          $s = git status --porcelain
+          if ($s) {
+            git commit -m "data: $(Get-Date -Format 'yyyy-MM-dd HH:mm')"
             git push
-          fi
+          } else {
+            Write-Host "Nothing to commit"
+          }
 
   deploy:
     name: Deploy GitHub Pages
