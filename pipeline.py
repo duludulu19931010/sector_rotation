@@ -350,21 +350,23 @@ def fetch_today_parallel() -> pd.DataFrame:
         f_twse_price = pool.submit(twse_day_all)
         f_twse_inst  = pool.submit(twse_t86, TODAY_8)
         f_tpex_price = pool.submit(tpex_quotes)
-        f_tpex_inst  = pool.submit(tpex_inst)
+        f_tpex_inst  = pool.submit(tpex_inst)   # 函式引用必須在任何同名賦值之前
 
-    twse_price = f_twse_price.result()
-    twse_inst  = f_twse_inst.result()
-    tpex_price = f_tpex_price.result()
-    tpex_inst  = f_tpex_inst.result()
+    # 用不同的區域變數名稱接收結果，避免與函式名衝突
+    r_twse_price = f_twse_price.result()
+    r_twse_inst  = f_twse_inst.result()
+    r_tpex_price = f_tpex_price.result()
+    r_tpex_inst  = f_tpex_inst.result()
 
-    log.info(f"  Parallel fetch done: TWSE {len(twse_price)} price / {len(twse_inst)} inst | "
-             f"TPEx {len(tpex_price)} price / {len(tpex_inst)} inst")
+    log.info(f"  Parallel fetch done: "
+             f"TWSE {len(r_twse_price)} price / {len(r_twse_inst)} inst | "
+             f"TPEx {len(r_tpex_price)} price / {len(r_tpex_inst)} inst")
 
     rows = []
 
     # TWSE 上市
-    for code, p in twse_price.items():
-        inst_net = twse_inst.get(code, 0)
+    for code, p in r_twse_price.items():
+        inst_net = r_twse_inst.get(code, 0)
         net_yi   = _calc_net_yi(p["volume"], p["value"], inst_net)
         rows.append({
             "date": TODAY, "code": code, "market": "TWSE",
@@ -376,8 +378,8 @@ def fetch_today_parallel() -> pd.DataFrame:
         })
 
     # TPEx 上櫃
-    for code, p in tpex_price.items():
-        inst_net = tpex_inst.get(code, 0)
+    for code, p in r_tpex_price.items():
+        inst_net = r_tpex_inst.get(code, 0)
         net_yi   = _calc_net_yi(p["volume"], p["value"], inst_net)
         rows.append({
             "date": TODAY, "code": code, "market": "TPEx",
