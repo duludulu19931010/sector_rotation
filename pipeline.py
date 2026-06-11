@@ -599,16 +599,31 @@ def load_names() -> dict[str, str]:
     return nm
 
 
+def db_incomplete_dates() -> list[str]:
+    with _db() as c:
+        rows = c.execute("""
+            SELECT date,
+                   SUM(CASE WHEN market='TPEx' THEN 1 ELSE 0 END) AS tpex_cnt
+            FROM daily
+            GROUP BY date
+            ORDER BY date DESC
+        """).fetchall()
+    return [r["date"] for r in rows if r["tpex_cnt"] == 0]
+
+
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--force",   action="store_true")
-    ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--force",         action="store_true")
+    ap.add_argument("--dry-run",       action="store_true")
+    ap.add_argument("--reset-history", action="store_true",
+                    help="刪除 DB 中 TPEx 筆數為 0 的歷史日期並重抓")
     args = ap.parse_args()
 
     log.info("=" * 60)
     log.info(f"TW$FLOW  {datetime.now()}  trade_date={TODAY}")
-    if args.force:   log.info("*** FORCE ***")
-    if args.dry_run: log.info("*** DRY-RUN ***")
+    if args.force:         log.info("*** FORCE ***")
+    if args.dry_run:       log.info("*** DRY-RUN ***")
+    if args.reset_history: log.info("*** RESET-HISTORY ***")
     log.info("=" * 60)
 
     DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -618,6 +633,17 @@ def main():
     name_map = load_names()
 
     if not args.dry_run:
+        incomplete = db_incomplete_dates()
+        if incomplete:
+            log.info(f"Found {len(incomplete)} dates with TPEx=0: {incomplete}")
+            if args.reset_history or args.force:
+                with _db() as c:
+                    ph = ",".join("?" * len(incomplete))
+                    c.execute(f"DELETE FROM daily WHERE date IN ({ph})", incomplete)
+                log.info(f"Deleted {len(incomplete)} incomplete dates from DB")
+            else:
+                log.warning("Run with --reset-history to re-fetch these dates")
+
         have = set(db_dates(25))
         need = get_recent_trade_dates(21)
         missing = [d for d in need if d not in have and d != TODAY]
