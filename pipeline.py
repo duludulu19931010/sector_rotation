@@ -852,13 +852,117 @@ def _flt(v) -> float:
 
 
 # ─────────────────────────────────────────────────────────
-#  Main
+#  診斷工具
 # ─────────────────────────────────────────────────────────
-def main():
+def _diagnose_tpex():
+    """
+    測試所有 TPEx 端點，印出實際回傳內容。
+    請在收盤後（15:30 以後）執行，確保 API 有資料。
+
+    用法：python pipeline.py --diagnose
+    把輸出貼給開發者，用來確認哪個端點正確。
+    """
+    import json as _json
+    print("=" * 60)
+    print("TPEx API 診斷")
+    print(f"執行時間: {datetime.now()}")
+    print("=" * 60)
+
+    # 所有已知的 TPEx 法人端點
+    inst_eps = [
+        "https://www.tpex.org.tw/openapi/v1/tpex_mainboard_institutional_investors",
+        "https://www.tpex.org.tw/openapi/v1/tpex/fund/daily_institutional_buying_selling",
+        "https://www.tpex.org.tw/openapi/v1/tpex_3insti_daily_trading",
+        "https://www.tpex.org.tw/openapi/v1/tpex/exchangeReport/tpex_mainboard_3insti",
+    ]
+    # 舊版 web 端點
+    web_eps = [
+        ("https://www.tpex.org.tw/web/stock/3insti/DAILY_TradE/3itrade_hedge_result.php",
+         {"l":"zh-tw","se":"EW","t":"D","d":"2026/06/10","o":"json"}),
+        ("https://www.tpex.org.tw/web/stock/3insti/DAILY_TradE/3itrade_hedge_result.php",
+         {"l":"zh-tw","se":"EW","t":"D","d":"2026/06/10","o":"data"}),
+    ]
+
+    import requests as _req
+    hdrs = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        "Accept": "application/json, text/plain, */*",
+        "Referer": "https://www.tpex.org.tw/",
+    }
+
+    print("\n--- OpenAPI 端點 ---")
+    for ep in inst_eps:
+        try:
+            r = _req.get(ep, headers=hdrs, verify=False, timeout=15)
+            body = r.text[:300]
+            is_json = False
+            json_type = "?"
+            try:
+                d = _json.loads(r.text)
+                is_json = True
+                if isinstance(d, list):
+                    json_type = f"list[{len(d)}]"
+                    if d:
+                        json_type += f", keys={list(d[0].keys())[:6]}"
+                elif isinstance(d, dict):
+                    json_type = f"dict keys={list(d.keys())[:6]}"
+            except Exception:
+                pass
+            print(f"\n[{r.status_code}] {ep.split('/')[-1]}")
+            print(f"  Content-Type: {r.headers.get('Content-Type','?')}")
+            print(f"  len={len(r.text)}, is_json={is_json}, type={json_type}")
+            if not is_json:
+                print(f"  body: {body!r}")
+        except Exception as e:
+            print(f"\n  ERROR: {e}")
+
+    print("\n--- Web 端點 ---")
+    for url, params in web_eps:
+        try:
+            r = _req.get(url, params=params, headers=hdrs, verify=False, timeout=15)
+            body = r.text[:300]
+            print(f"\n[{r.status_code}] {url.split('/')[-1]}?{list(params.items())}")
+            print(f"  Content-Type: {r.headers.get('Content-Type','?')}")
+            print(f"  len={len(r.text)}, body: {body!r}")
+        except Exception as e:
+            print(f"\n  ERROR: {e}")
+
+    print("\n--- TPEx 收盤價端點（確認哪個有效）---")
+    price_eps = [
+        "https://www.tpex.org.tw/openapi/v1/tpex_mainboard_daily_close_quotes",
+        "https://www.tpex.org.tw/openapi/v1/tpex_mainboard_quotes",
+        "https://www.tpex.org.tw/openapi/v1/tpex/exchangeReport/daily_close_quotes",
+    ]
+    for ep in price_eps:
+        try:
+            r = _req.get(ep, headers=hdrs, verify=False, timeout=15)
+            try:
+                d = _json.loads(r.text)
+                if isinstance(d, list) and d:
+                    print(f"\n[{r.status_code}] ✓ {ep.split('/')[-1]}: {len(d)} rows, keys={list(d[0].keys())[:5]}")
+                    print(f"  sample: {d[0]}")
+                else:
+                    print(f"\n[{r.status_code}] ✗ {ep.split('/')[-1]}: {r.text[:100]!r}")
+            except Exception:
+                print(f"\n[{r.status_code}] ✗ {ep.split('/')[-1]}: {r.text[:100]!r}")
+        except Exception as e:
+            print(f"\n  ERROR: {e}")
+
+    print("\n" + "=" * 60)
+    print("請把以上輸出完整複製後回報")
+    print("=" * 60)
+
+
+
     ap = argparse.ArgumentParser(description="TW$FLOW Daily Pipeline")
-    ap.add_argument("--force",    action="store_true", help="忽略快取，強制重新抓取")
-    ap.add_argument("--dry-run",  action="store_true", help="只從 DB 重算 JSON")
+    ap.add_argument("--force",     action="store_true", help="忽略快取，強制重新抓取")
+    ap.add_argument("--dry-run",   action="store_true", help="只從 DB 重算 JSON")
+    ap.add_argument("--diagnose",  action="store_true", help="診斷 TPEx API 端點（測試用）")
     args = ap.parse_args()
+
+    if args.diagnose:
+        _diagnose_tpex()
+        return
 
     t0 = time.time()
     log.info("=" * 60)
