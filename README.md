@@ -9,9 +9,11 @@ TWSE / TPEx 官方 API 每日更新 → SQLite 累積 → GitHub Pages
 
 | 市場 | 資料 | 端點 |
 |------|------|------|
-| TWSE 上市 | 全市場收盤行情 | `https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_ALL` |
-| TWSE 上市 | 三大法人買賣超（T86） | `https://www.twse.com.tw/rwd/zh/fund/T86` |
-| TPEx 上櫃 | 收盤行情 | `https://www.tpex.org.tw/openapi/v1/tpex_mainboard_quotes` |
+| TWSE 上市 | 今日收盤行情 | `https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_ALL` |
+| TWSE 上市 | 歷史收盤行情 | `https://www.twse.com.tw/rwd/zh/afterTrading/STOCK_DAY_ALL?date=YYYYMMDD` |
+| TWSE 上市 | 三大法人買賣超（T86） | `https://www.twse.com.tw/rwd/zh/fund/T86?date=YYYYMMDD` |
+| TPEx 上櫃 | 今日收盤行情 | `https://www.tpex.org.tw/openapi/v1/tpex_mainboard_quotes` |
+| TPEx 上櫃 | 歷史收盤行情 | `https://www.tpex.org.tw/web/stock/aftertrading/daily_close_quotes/stk_quote_result.php` |
 | TPEx 上櫃 | 三大法人買賣超 | `https://www.tpex.org.tw/openapi/v1/tpex_3insti_daily_trading` |
 
 TPEx 端點使用 `verify=False`（TPEx 憑證缺 Subject Key Identifier）。
@@ -40,16 +42,24 @@ TPEx 端點使用 `verify=False`（TPEx 憑證缺 Subject Key Identifier）。
 ## 架構
 
 ```
-├── pipeline.py               主程式
+├── pipeline.py
 ├── requirements.txt
+├── .gitignore
 ├── input/
 │   ├── Group.csv             族群個股清單（Big5，58 族群）
 │   └── stock_list.csv        股票名稱對照（CP950，1937 筆）
-├── db/market.db              SQLite（每日累積）
+├── db/
+│   └── market.db             SQLite（每日累積，自動建立）
 ├── docs/
 │   ├── index.html
 │   ├── sector.html           主頁面
-│   └── assets/data/          每日 JSON
+│   └── assets/data/
+│       ├── bubble_data.json
+│       ├── inflow_low_gain.json
+│       ├── stealth_accumulation.json
+│       ├── group_stats.json
+│       ├── metadata.json
+│       └── market_data.csv   DB 全量資料匯出（UTF-8 BOM，Excel 可直接開啟）
 └── .github/workflows/daily.yml
 ```
 
@@ -64,19 +74,40 @@ pip install -r requirements.txt
 python pipeline.py
 ```
 
-首次執行只有今日資料，歷史資料會在後續每天累積。
+首次執行會自動補抓近 21 個交易日的歷史資料，約需 3～5 分鐘。完成後漲跌幅和各期淨買賣超即可正常顯示。
 
 ### 選項
 
 ```bash
 python pipeline.py              # 正常（快取則跳過 API）
 python pipeline.py --force      # 強制重抓今日
-python pipeline.py --dry-run    # 只用 DB 資料重算 JSON
+python pipeline.py --dry-run    # 只用 DB 資料重算 JSON 和 CSV
 ```
 
 ### 自動排程
 
-GitHub Actions 每週一到五 **台灣時間 18:30** 自動執行，結束後 GitHub Pages 自動更新。**不需要任何本地機器。**
+GitHub Actions 每週一到五**台灣時間 18:30** 自動執行，結束後 GitHub Pages 自動更新。**不需要任何本地機器。**
+
+---
+
+## 資料庫
+
+SQLite 單表 `daily`，同時匯出 CSV 至 `docs/assets/data/market_data.csv`。
+
+| 欄位 | 說明 |
+|------|------|
+| `date` | 交易日 YYYY-MM-DD |
+| `code` | 股票代號（4位） |
+| `market` | TWSE / TPEx |
+| `name` | 股票名稱 |
+| `open_price` | 開盤價 |
+| `close_price` | 收盤價 |
+| `high_price` | 最高價 |
+| `low_price` | 最低價 |
+| `trade_volume` | 成交股數 |
+| `trade_value` | 成交金額（元） |
+| `inst_net` | 三大法人淨買超（張） |
+| `net_yi` | 今日淨買賣超（億） |
 
 ---
 
@@ -99,8 +130,9 @@ repo → Settings → Actions → General → Workflow permissions → **Read an
 | `Pages 401` | Source 未選 GitHub Actions | Settings → Pages → Source → GitHub Actions |
 | TWSE API 空回應 | 非交易日或收盤前執行 | 等 15:30 收盤後再執行 |
 | TPEx SSL 警告 | TPEx 憑證問題 | 已設定 `verify=False`，不影響功能 |
-| 漲跌幅全為 0 | DB 只有一天資料 | 第二天起正常 |
-| `database is locked` | 上次中斷 | 刪 `db/market.db-wal` 和 `db/market.db-shm` |
+| 漲跌幅全為 0 | DB 歷史不足 6 天 | 首次執行自動補抓歷史，執行完即正常 |
+| `database is locked` | 上次執行中斷 | 刪除 `db/market.db-wal` 和 `db/market.db-shm` |
+| 歷史補抓失敗 | TWSE 歷史端點限速 | 等 30 秒後重試，或 `--force` 重跑 |
 
 ---
 
