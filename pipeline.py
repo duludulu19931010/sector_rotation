@@ -290,14 +290,14 @@ def fetch_tpex_price_hist(date8: str) -> dict[str, dict]:
     data = _get(
         "https://www.tpex.org.tw/web/stock/aftertrading/daily_close_quotes/stk_quote_result.php",
         params={"l": "zh-tw", "d": f"{yy}/{mm}/{dd}", "se": "EW"},
-        headers=TPEX_HEADERS, verify=False,
+        headers=TPEX_HEADERS, verify=False, retries=3, delay=3.0,
     )
     if not isinstance(data, dict):
-        log.warning(f"TPEx price (hist) {date8}: unexpected response type")
+        log.warning(f"TPEx price (hist) {date8}: bad response")
         return {}
     aa = data.get("aaData", [])
     if not aa:
-        log.warning(f"TPEx price (hist) {date8}: aaData empty")
+        log.warning(f"TPEx price (hist) {date8}: empty")
         return {}
     result = {}
     for row in aa:
@@ -343,31 +343,6 @@ def fetch_tpex_inst() -> dict[str, int]:
     return result
 
 
-def build_day_df(trade_date: str,
-                 twse_price: dict, twse_inst: dict,
-                 tpex_price: dict, tpex_inst: dict) -> pd.DataFrame:
-    rows = []
-    for code, p in twse_price.items():
-        inst = twse_inst.get(code, 0)
-        rows.append({
-            "date": trade_date, "code": code, "market": "TWSE", "name": p["name"],
-            "open_price": p["open"],   "close_price": p["close"],
-            "high_price": p["high"],   "low_price":   p["low"],
-            "trade_volume": p["volume"], "trade_value": p["value"],
-            "inst_net": inst, "net_yi": _calc_net_yi(p["volume"], p["value"], inst),
-        })
-    for code, p in tpex_price.items():
-        inst = tpex_inst.get(code, 0)
-        rows.append({
-            "date": trade_date, "code": code, "market": "TPEx", "name": p["name"],
-            "open_price": p["open"],   "close_price": p["close"],
-            "high_price": p["high"],   "low_price":   p["low"],
-            "trade_volume": p["volume"], "trade_value": p["value"],
-            "inst_net": inst, "net_yi": _calc_net_yi(p["volume"], p["value"], inst),
-        })
-    return pd.DataFrame(rows)
-
-
 def fetch_today() -> pd.DataFrame:
     with ThreadPoolExecutor(max_workers=4) as pool:
         f_twse_p = pool.submit(fetch_twse_price_today)
@@ -392,11 +367,28 @@ def fetch_history(missing_dates: list[str]) -> pd.DataFrame:
         twse_p = fetch_twse_price_hist(d8)
         twse_i = fetch_twse_t86(d8)
         tpex_p = fetch_tpex_price_hist(d8)
-        tpex_i = {}
-        day_df = build_day_df(dd, twse_p, twse_i, tpex_p, tpex_i)
-        if not day_df.empty:
-            frames.append(day_df)
-        time.sleep(0.5)
+        rows = []
+        for code, p in twse_p.items():
+            inst = twse_i.get(code, 0)
+            rows.append({
+                "date": dd, "code": code, "market": "TWSE", "name": p["name"],
+                "open_price": p["open"],   "close_price": p["close"],
+                "high_price": p["high"],   "low_price":   p["low"],
+                "trade_volume": p["volume"], "trade_value": p["value"],
+                "inst_net": inst, "net_yi": _calc_net_yi(p["volume"], p["value"], inst),
+            })
+        for code, p in tpex_p.items():
+            rows.append({
+                "date": dd, "code": code, "market": "TPEx", "name": p["name"],
+                "open_price": p["open"],   "close_price": p["close"],
+                "high_price": p["high"],   "low_price":   p["low"],
+                "trade_volume": p["volume"], "trade_value": p["value"],
+                "inst_net": 0, "net_yi": 0.0,
+            })
+        if rows:
+            frames.append(pd.DataFrame(rows))
+            log.info(f"History {dd}: TWSE={len(twse_p)}, TPEx={len(tpex_p)}")
+        time.sleep(1.0)
     return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
 
 
@@ -605,8 +597,8 @@ def db_incomplete_dates() -> list[str]:
             SELECT date,
                    SUM(CASE WHEN market='TPEx' THEN 1 ELSE 0 END) AS tpex_cnt
             FROM daily
+            WHERE date = (SELECT MAX(date) FROM daily)
             GROUP BY date
-            ORDER BY date DESC
         """).fetchall()
     return [r["date"] for r in rows if r["tpex_cnt"] == 0]
 
