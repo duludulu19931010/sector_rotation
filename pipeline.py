@@ -105,7 +105,17 @@ def db_dates(n: int = 30) -> list[str]:
 
 def db_has_today() -> bool:
     dates = db_dates(1)
-    return bool(dates) and dates[0] == TODAY
+    if not dates or dates[0] != TODAY:
+        return False
+    with _db() as c:
+        n = c.execute(
+            "SELECT COUNT(*) FROM daily WHERE date=? AND market='TWSE' AND inst_net != 0",
+            (TODAY,)
+        ).fetchone()[0]
+    if n == 0:
+        log.info(f"Today's data exists but TWSE inst_net all 0, will retry")
+        return False
+    return True
 
 
 def db_load(days: int = 21) -> pd.DataFrame:
@@ -357,7 +367,32 @@ def fetch_today() -> pd.DataFrame:
 
     log.info(f"Parallel done: TWSE {len(r_twse_p)} price/{len(r_twse_i)} inst "
              f"| TPEx {len(r_tpex_p)} price/{len(r_tpex_i)} inst")
-    return build_day_df(TODAY, r_twse_p, r_twse_i, r_tpex_p, r_tpex_i)
+
+    rows = []
+    for code, p in r_twse_p.items():
+        inst = r_twse_i.get(code, 0)
+        rows.append({
+            "date": TODAY, "code": code, "market": "TWSE", "name": p["name"],
+            "open_price": p["open"],   "close_price": p["close"],
+            "high_price": p["high"],   "low_price":   p["low"],
+            "trade_volume": p["volume"], "trade_value": p["value"],
+            "inst_net": inst, "net_yi": _calc_net_yi(p["volume"], p["value"], inst),
+        })
+    for code, p in r_tpex_p.items():
+        inst = r_tpex_i.get(code, 0)
+        rows.append({
+            "date": TODAY, "code": code, "market": "TPEx", "name": p["name"],
+            "open_price": p["open"],   "close_price": p["close"],
+            "high_price": p["high"],   "low_price":   p["low"],
+            "trade_volume": p["volume"], "trade_value": p["value"],
+            "inst_net": inst, "net_yi": _calc_net_yi(p["volume"], p["value"], inst),
+        })
+
+    df = pd.DataFrame(rows)
+    twse_n = sum(1 for r in rows if r["market"] == "TWSE")
+    tpex_n = sum(1 for r in rows if r["market"] == "TPEx")
+    log.info(f"Today total: {len(df)} stocks (TWSE={twse_n}, TPEx={tpex_n})")
+    return df
 
 
 def fetch_history(missing_dates: list[str]) -> pd.DataFrame:
@@ -649,6 +684,10 @@ def main():
         if args.force or not db_has_today():
             today_df = fetch_today()
             if not today_df.empty:
+                twse_inst_count = (today_df["market"] == "TWSE") & (today_df["inst_net"] != 0)
+                if twse_inst_count.sum() == 0:
+                    log.warning("Today's TWSE T86 not yet available (inst_net all 0). "
+                                 "Saving price data anyway; will retry T86 on next run.")
                 db_save(today_df)
             else:
                 log.warning("No data fetched today (API may not be available yet)")
