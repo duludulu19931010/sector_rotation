@@ -304,8 +304,8 @@ def fetch_tpex_price_today() -> dict[str, dict]:
         result[code] = {
             "name":   item.get("CompanyName", ""),
             "close":  close,
-            "volume": _int(item.get("TradeVolume", 0)),
-            "value":  _int(item.get("TradeValue",  0)),
+            "volume": _int(item.get("TradingShares",    0)),
+            "value":  _int(item.get("TransactionAmount", 0)),
         }
     log.info(f"TPEx price (today): {len(result)} stocks")
     return result
