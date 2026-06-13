@@ -17,6 +17,10 @@ on:
         description: "Dry run（不打API，只用現有DB+CSV重算）"
         type: boolean
         default: false
+      check_code:
+        description: "查詢股票代號（留空則不查）"
+        type: string
+        default: ""
 
 permissions:
   contents: write
@@ -60,6 +64,13 @@ jobs:
           } else {
             python pipeline.py
           }
+
+      - name: Check record
+        if: ${{ github.event.inputs.check_code != '' }}
+        run: |
+          python check_record.py "${{ github.event.inputs.check_code }}"
+          Write-Host "---"
+          python check_record.py --date $(Get-Date -Format 'yyyy-MM-dd')
 
       - name: Verify outputs
         run: |
