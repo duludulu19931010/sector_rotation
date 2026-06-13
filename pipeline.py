@@ -447,10 +447,16 @@ def load_close_csv_files() -> pd.DataFrame:
                 continue
             sub = df[["代碼", "成交"]].copy()
             sub.columns = ["code", "close_price"]
-            sub["code"] = sub["code"].astype(str).str.zfill(4)
+            sub["code"] = (
+                sub["code"].astype(str)
+                .str.strip()
+                .str.replace(r"\.0$", "", regex=True)
+                .str.zfill(4)
+            )
             sub["close_price"] = pd.to_numeric(sub["close_price"], errors="coerce")
             sub["date"] = dd
             sub = sub.dropna(subset=["close_price"])
+            sub = sub[sub["code"].str.match(r"^\d{4,6}$")]
             frames.append(sub[["date", "code", "close_price"]])
             log.info(f"Loaded {f.name}: {len(sub)} rows for {dd}")
         except Exception as e:
@@ -496,6 +502,23 @@ def compute(hist_df: pd.DataFrame,
         log.warning(f"latest={latest} not in CSV close, using {close_dates[-1]}")
     else:
         close_now = df[df["date"] == latest].set_index("code")["close_price"]
+
+    log.info(f"close_now: {len(close_now)} codes, "
+             f"sample={list(close_now.index[:5])}")
+
+    all_group_codes = {str(c).zfill(4) for codes in groups.values() for c in codes}
+    matched_total = all_group_codes & set(close_now.index)
+    log.info(f"Group codes total={len(all_group_codes)}, "
+             f"matched in close_now={len(matched_total)}")
+    if len(matched_total) == 0:
+        sample_group = sorted(all_group_codes)[:5]
+        sample_close = sorted(close_now.index)[:5]
+        log.warning(f"ZERO MATCH! group sample={sample_group}, "
+                     f"close_now sample={sample_close}")
+        if sample_group and sample_close:
+            g0, c0 = sample_group[0], sample_close[0]
+            log.warning(f"  repr group code: {g0!r} (len={len(g0)}), "
+                         f"repr close code: {c0!r} (len={len(c0)})")
 
     d_prev1  = close_dates[-2]  if len(close_dates) >= 2  else None
     d_prev6  = close_dates[-6]  if len(close_dates) >= 6  else None
