@@ -7,7 +7,7 @@ import time
 import urllib3
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 import numpy as np
@@ -256,6 +256,68 @@ def fetch_twse_t86(date8: str) -> dict[str, int]:
     return result
 
 
+def fetch_twse_stock_month(code: str, date8: str) -> dict[str, dict]:
+    """
+    個股月歷史（TWSE）
+    回傳: {date(YYYY-MM-DD): {close, volume, value}}
+    """
+    data = _get(
+        "https://www.twse.com.tw/exchangeReport/STOCK_DAY",
+        params={"response": "json", "date": date8, "stockNo": code},
+        retries=2, delay=1.5,
+    )
+    if not isinstance(data, dict) or data.get("stat") != "OK":
+        return {}
+    result = {}
+    for row in data.get("data", []):
+        if len(row) < 9:
+            continue
+        roc_date = str(row[0]).strip()
+        try:
+            y, m, d = roc_date.split("/")
+            dd = f"{int(y)+1911:04d}-{m}-{d}"
+        except Exception:
+            continue
+        result[dd] = {
+            "volume": _int(row[1]),
+            "value":  _int(row[2]),
+            "close":  _flt(row[6]),
+        }
+    return result
+
+
+def fetch_tpex_stock_month(code: str, date8: str) -> dict[str, dict]:
+    """
+    個股月歷史（TPEx）
+    回傳: {date(YYYY-MM-DD): {close, volume, value}}
+    """
+    yy = int(date8[:4]) - 1911
+    mm = date8[4:6]
+    data = _get(
+        "https://www.tpex.org.tw/web/stock/aftertrading/daily_trading_info/st43_result.php",
+        params={"d": f"{yy}/{mm}", "stkno": code},
+        headers=TPEX_HEADERS, verify=False, retries=2, delay=1.5,
+    )
+    if not isinstance(data, dict):
+        return {}
+    result = {}
+    for row in data.get("aaData", []):
+        if len(row) < 9:
+            continue
+        roc_date = str(row[0]).strip()
+        try:
+            y, m, d = roc_date.split("/")
+            dd = f"{int(y)+1911:04d}-{m}-{d}"
+        except Exception:
+            continue
+        result[dd] = {
+            "volume": _int(row[1]),
+            "value":  _int(row[2]),
+            "close":  _flt(row[6]),
+        }
+    return result
+
+
 def fetch_tpex_price_today() -> dict[str, dict]:
     data = _get(
         "https://www.tpex.org.tw/openapi/v1/tpex_mainboard_quotes",
@@ -307,6 +369,66 @@ def fetch_tpex_inst() -> dict[str, int]:
         result[code] = total
     log.info(f"TPEx 3insti: {len(result)} stocks")
     return result
+
+
+def fetch_group_history(group_codes: list[str],
+                         code_market: dict[str, str],
+                         months: list[str]) -> pd.DataFrame:
+    """
+    補抓族群個股近N個月歷史（價量）+ T86歷史（三大法人，全市場逐日）
+
+    group_codes: 族群所有代號（4位）
+    code_market: {代號: 'TWSE'/'TPEx'}（今日資料判斷市場）
+    months: 要抓的月份列表，格式 YYYYMM01（例如 ['20260501','20260601']）
+    """
+    log.info(f"Backfilling history: {len(group_codes)} codes x {len(months)} months")
+
+    price_hist: dict[str, dict[str, dict]] = {}
+    for i, code in enumerate(group_codes):
+        market = code_market.get(code, "TWSE")
+        merged = {}
+        for m8 in months:
+            if market == "TPEx":
+                month_data = fetch_tpex_stock_month(code, m8)
+            else:
+                month_data = fetch_twse_stock_month(code, m8)
+            merged.update(month_data)
+            time.sleep(0.15)
+        price_hist[code] = merged
+        if (i + 1) % 100 == 0:
+            log.info(f"  history fetch progress: {i+1}/{len(group_codes)}")
+
+    total_days = sum(len(v) for v in price_hist.values())
+    log.info(f"Backfill price done: {len(price_hist)} codes, {total_days} day-records")
+
+    all_hist_dates = sorted({d for v in price_hist.values() for d in v.keys()})
+    log.info(f"Backfill date range: {all_hist_dates[0] if all_hist_dates else 'N/A'} "
+             f"~ {all_hist_dates[-1] if all_hist_dates else 'N/A'} "
+             f"({len(all_hist_dates)} dates)")
+
+    t86_hist: dict[str, dict[str, int]] = {}
+    for dd in all_hist_dates:
+        d8 = dd.replace("-", "")
+        t86_hist[dd] = fetch_twse_t86(d8)
+        time.sleep(0.3)
+
+    rows = []
+    for code, day_data in price_hist.items():
+        market = code_market.get(code, "TWSE")
+        for dd, p in day_data.items():
+            inst = t86_hist.get(dd, {}).get(code, 0) if market == "TWSE" else 0
+            rows.append({
+                "date": dd, "code": code, "market": market,
+                "name": "",
+                "close_price": p["close"],
+                "trade_volume": p["volume"], "trade_value": p["value"],
+                "inst_net": inst,
+                "net_yi": _calc_net_yi(p["volume"], p["value"], inst),
+            })
+
+    df = pd.DataFrame(rows)
+    log.info(f"Backfill total: {len(df)} rows")
+    return df
 
 
 def fetch_today() -> pd.DataFrame:
@@ -651,6 +773,14 @@ def load_names() -> dict[str, str]:
     return nm
 
 
+def _months_for_lookback() -> list[str]:
+    today = date.today()
+    this_month = today.strftime("%Y%m01")
+    prev_month_date = today.replace(day=1) - timedelta(days=1)
+    prev_month = prev_month_date.strftime("%Y%m01")
+    return sorted({prev_month, this_month})
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--force",         action="store_true")
@@ -692,6 +822,32 @@ def main():
             db_save(today_df)
         else:
             log.info("[CACHE] Today already in DB")
+
+        existing_dates = set(db_dates(25))
+        if len(existing_dates) < 21 or args.reset_history:
+            log.info(f"DB has {len(existing_dates)} trade dates (<21), backfilling history")
+
+            today_df_for_market = db_load(days=1)
+            code_market = {}
+            if not today_df_for_market.empty:
+                code_market = dict(zip(
+                    today_df_for_market["code"].astype(str).str.zfill(4),
+                    today_df_for_market["market"],
+                ))
+
+            group_codes = sorted({str(c).zfill(4) for codes in groups.values() for c in codes})
+            months = _months_for_lookback()
+            log.info(f"Backfill months: {months}")
+
+            hist_df = fetch_group_history(group_codes, code_market, months)
+            if not hist_df.empty:
+                hist_df = hist_df[~hist_df["date"].isin(existing_dates | {TODAY})]
+                if not hist_df.empty:
+                    name_lookup = name_map
+                    hist_df["name"] = hist_df["code"].map(name_lookup).fillna("")
+                    db_save(hist_df)
+                else:
+                    log.info("Backfill: no new dates to save")
 
     hist = db_load(days=25)
     if hist.empty:
