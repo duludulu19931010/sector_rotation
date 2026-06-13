@@ -25,6 +25,10 @@ on:
         description: "測試 TPEx daily_close_quotes 是否支援歷史日期參數"
         type: boolean
         default: false
+      run_tpex_fields_test:
+        description: "比對 tpex_mainboard_quotes 與 daily_close_quotes 欄位"
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -60,6 +64,12 @@ jobs:
         env:
           PYTHONIOENCODING: utf-8
         run: python test_tpex_daily_close.py
+
+      - name: Test TPEx field names
+        if: ${{ github.event.inputs.run_tpex_fields_test == 'true' }}
+        env:
+          PYTHONIOENCODING: utf-8
+        run: python test_tpex_fields.py
 
       - name: Run pipeline
         env:
