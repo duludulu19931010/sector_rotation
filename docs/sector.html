@@ -219,6 +219,8 @@ tr.srow td{padding:0;background:rgba(7,9,13,.6);border-bottom:2px solid var(--dt
         <th style="text-align:right">今日淨買超(億)</th>
         <th style="text-align:right">五日漲跌</th>
         <th style="text-align:right">五日淨買超(億)</th>
+        <th style="text-align:right">二十日漲跌</th>
+        <th style="text-align:right">二十日淨買超(億)</th>
       </tr></thead>
       <tbody id="sp-stocks"></tbody>
     </table>
@@ -372,6 +374,7 @@ function renderBubble(data){
 <span style="color:#4a6278">近20日累計</span><span style="color:${col(d.net_20d)};text-align:right">${fYi(d.net_20d)}</span>
 <span style="color:#4a6278">今日漲跌</span><span style="color:${col(d.chg_1d)};text-align:right">${fPct(d.chg_1d)}</span>
 <span style="color:#4a6278">五日漲跌</span><span style="color:${col(d.chg_5d)};text-align:right">${fPct(d.chg_5d)}</span>
+<span style="color:#4a6278">二十日漲跌</span><span style="color:${col(d.chg_20d)};text-align:right">${fPct(d.chg_20d)}</span>
 </div>
 <div style="margin-top:8px;font-size:13px;color:#4a6278">點擊查看個股明細 →</div>`;
       }
@@ -434,7 +437,9 @@ function openPanel(d){
     ['今日淨買超(億)', d.net_1d, fYi],
     ['五日淨買超(億)', d.net_5d, fYi],
     ['近20日累計(億)', d.net_20d,fYi],
+    ['今日漲跌',       d.chg_1d, fPct],
     ['五日漲跌',       d.chg_5d, fPct],
+    ['二十日漲跌',     d.chg_20d,fPct],
   ].map(([l,v,f])=>`
     <div class="sp-stat">
       <div class="sp-sl">${l}</div>
@@ -450,8 +455,10 @@ function openPanel(d){
         <td class="sp-num ${cls(s.net_1d)}">${fYi(s.net_1d)}</td>
         <td class="sp-num ${cls(s.chg_5d)}">${fPct(s.chg_5d)}</td>
         <td class="sp-num ${cls(s.net_5d)}">${fYi(s.net_5d)}</td>
+        <td class="sp-num ${cls(s.chg_20d)}">${fPct(s.chg_20d)}</td>
+        <td class="sp-num ${cls(s.net_20d)}">${fYi(s.net_20d)}</td>
       </tr>`).join('')
-    :'<tr><td colspan="6" style="color:var(--dm);padding:20px">此族群暫無個股資料</td></tr>';
+    :'<tr><td colspan="8" style="color:var(--dm);padding:20px">此族群暫無個股資料</td></tr>';
 
   document.getElementById('sp').classList.add('on');
   document.getElementById('ov').classList.add('on');
