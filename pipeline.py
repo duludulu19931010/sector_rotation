@@ -254,11 +254,31 @@ def fetch_twse_t86(date8: str) -> dict[str, int]:
     )
     if not isinstance(data, dict) or data.get("stat") != "OK":
         return {}
+
+    fields = data.get("fields", [])
+    raw_data = data.get("data", [])
+    log.info(f"T86 RAW {date8}: stat={data.get('stat')}, "
+             f"fields({len(fields)})={fields}, rows={len(raw_data)}")
+    if raw_data:
+        row_lens = set(len(r) for r in raw_data)
+        log.info(f"T86 RAW {date8}: row lengths={row_lens}")
+        log.info(f"T86 RAW {date8}: first row={raw_data[0]}")
+        for r in raw_data:
+            if len(r) > 0 and str(r[0]).strip() == "2330":
+                log.info(f"T86 RAW {date8}: row for 2330 = {r}")
+                break
+
     result = {}
-    for row in data.get("data", []):
+    dup_count = 0
+    for row in raw_data:
         if len(row) >= 15:
             code = str(row[0]).strip().zfill(4)
+            if code in result:
+                dup_count += 1
             result[code] = _int(row[14])
+    if dup_count:
+        log.warning(f"T86 {date8}: {dup_count} duplicate codes encountered "
+                     f"(rows={len(raw_data)}, unique codes={len(result)})")
     log.info(f"T86(TWSE) {date8}: {len(result)} stocks")
     return result
 
@@ -547,12 +567,31 @@ def compute(hist_df: pd.DataFrame,
     net_5d  = net_pv[[c for c in last5  if c in net_pv.columns]].sum(axis=1)
     net_20d = net_pv[[c for c in last20 if c in net_pv.columns]].sum(axis=1)
 
+    log.info(f"net_pv shape={net_pv.shape}, columns={sorted(net_pv.columns)[-6:]}")
+    log.info(f"last5={last5}")
+    log.info(f"net_5d describe: count={net_5d.count()}, "
+             f"min={net_5d.min():.4f}, max={net_5d.max():.4f}, "
+             f"nonzero={int((net_5d!=0).sum())}, "
+             f">0={int((net_5d>0).sum())}, <-2={int((net_5d<-2).sum())}")
+
     def clamp_net(s: pd.Series, limit: float) -> pd.Series:
         return s.where(s.abs() <= limit, 0.0)
 
     net_1d  = clamp_net(net_1d,  1000.0)
     net_5d  = clamp_net(net_5d,  5000.0)
     net_20d = clamp_net(net_20d, 20000.0)
+
+    log.info(f"after clamp: net_5d nonzero={int((net_5d!=0).sum())}, "
+             f">0={int((net_5d>0).sum())}, <-2={int((net_5d<-2).sum())}")
+
+    net_codes   = set(net_5d.index)
+    close_codes = set(close_now.index)
+    overlap = net_codes & close_codes
+    log.info(f"net_5d codes={len(net_codes)}, close_now codes={len(close_codes)}, "
+             f"overlap={len(overlap)}")
+    if len(overlap) < len(net_codes) * 0.5:
+        log.warning(f"net_5d sample: {sorted(net_codes)[:5]}")
+        log.warning(f"close_now sample: {sorted(close_codes)[:5]}")
 
     db_names = df[df["date"] == latest].set_index("code")["name"].to_dict()
     def get_name(code: str) -> str:
