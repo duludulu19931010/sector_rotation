@@ -13,6 +13,10 @@ on:
         description: "重新補抓歷史（清除 TPEx=0 的日期）"
         type: boolean
         default: false
+      dry_run:
+        description: "Dry run（不打API，只用現有DB+CSV重算）"
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -50,6 +54,7 @@ jobs:
           $flags = @()
           if ("${{ github.event.inputs.force }}" -eq "true")         { $flags += "--force" }
           if ("${{ github.event.inputs.reset_history }}" -eq "true") { $flags += "--reset-history" }
+          if ("${{ github.event.inputs.dry_run }}" -eq "true")       { $flags += "--dry-run" }
           if ($flags.Count -gt 0) {
             python pipeline.py @flags
           } else {
