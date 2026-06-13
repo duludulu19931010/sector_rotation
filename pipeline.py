@@ -526,17 +526,20 @@ def compute(hist_df: pd.DataFrame,
             records.append(_empty(gname, len(raw_codes)))
             continue
 
-        def _s(s: pd.Series) -> float:
-            return float(s.reindex(codes).dropna().sum())
-        def _m(s: pd.Series) -> float:
-            v = s.reindex(codes).dropna()
-            return round(float(v.mean()), 2) if not v.empty else 0.0
+        g1  = round(sum(s["net_1d"]  for s in stocks), 3)
+        g5  = round(sum(s["net_5d"]  for s in stocks), 3)
+        g20 = round(sum(s["net_20d"] for s in stocks), 3)
 
-        g1  = round(_s(net_1d),  3)
-        g5  = round(_s(net_5d),  3)
-        g20 = round(_s(net_20d), 3)
-        gc1 = _m(chg_1d)
-        gc5 = _m(chg_5d)
+        chg1_vals = [s["chg_1d"] for s in stocks if s["chg_1d"] != 0.0]
+        chg5_vals = [s["chg_5d"] for s in stocks if s["chg_5d"] != 0.0]
+        gc1 = round(sum(chg1_vals) / len(chg1_vals), 2) if chg1_vals else 0.0
+        gc5 = round(sum(chg5_vals) / len(chg5_vals), 2) if chg5_vals else 0.0
+
+        if abs(g1)  > 1000:  g1  = 0.0
+        if abs(g5)  > 5000:  g5  = 0.0
+        if abs(g20) > 20000: g20 = 0.0
+        if abs(gc1) > 11:    gc1 = 0.0
+        if abs(gc5) > 60:    gc5 = 0.0
 
         if   g5 >  2 and gc5 > 1:  label = "主力"
         elif g5 >  0 and gc5 <= 1: label = "輪動"
