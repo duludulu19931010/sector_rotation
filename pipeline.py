@@ -907,7 +907,7 @@ def export_json(records: list[dict], details: dict, trade_date: str) -> None:
          and r["net_5d"] < 0
          and price_any3_le(r, 5.0)
          and r["chg_5d"] <= 10.0],
-        key=lambda x: x["net_5d"], reverse=True
+        key=lambda x: x["net_5d"], reverse=False
     ))
 
     _jdump("bubble_data.json",          bubble)
