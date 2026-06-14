@@ -671,14 +671,12 @@ def compute(hist_df: pd.DataFrame,
         close_dates = sorted(close_pv.columns)
         log.warning("No XQ close data, using API close_price fallback")
 
-    # 統一交易日序列：以 XQ 日期為準（確保漲跌幅與買賣超用相同的日期基準）
-    # 取 XQ 與 DB 的交集，保留有完整資料的交易日
-    db_dates_set = set(all_dates)
-    trade_dates  = sorted([d for d in close_dates if d in db_dates_set])
-    if not trade_dates:
-        trade_dates = close_dates  # fallback
+    # 漲跌幅序列：純粹用 XQ CSV 的日期（不與 DB 取交集）
+    # 買賣超序列：用 DB 的日期
+    # latest_trade = XQ 最新日期（即最新收盤資料日）
+    trade_dates  = close_dates
     latest_trade = trade_dates[-1]
-    log.info(f"Unified trade dates: {trade_dates[0]} ~ {latest_trade} ({len(trade_dates)} days)")
+    log.info(f"XQ trade dates: {trade_dates[0]} ~ {latest_trade} ({len(trade_dates)} days)")
 
     if latest_trade in close_pv.columns:
         close_now = close_pv[latest_trade].dropna()
@@ -689,13 +687,19 @@ def compute(hist_df: pd.DataFrame,
     matched = all_group_codes & set(close_now.index)
     log.info(f"Group codes={len(all_group_codes)}, matched in close_now={len(matched)}")
 
-    # 漲跌幅基準日（均基於統一的 trade_dates）
-    d_prev1  = trade_dates[-2]  if len(trade_dates) >= 2  else None   # 最新交易日前一日
-    d_prev2  = trade_dates[-3]  if len(trade_dates) >= 3  else None   # 最新交易日前二日
-    d_prev3  = trade_dates[-4]  if len(trade_dates) >= 4  else None   # 最新交易日前三日
-    d_prev6  = trade_dates[-6]  if len(trade_dates) >= 6  else None   # 五日前基準
-    d_prev21 = trade_dates[-21] if len(trade_dates) >= 21 else None   # 二十日前基準
-    log.info(f"chg_1d base={d_prev1}, chg_5d base={d_prev6}, chg_20d base={d_prev21}")
+    # 漲跌幅基準日（用 XQ 日期序列）
+    d_prev1  = trade_dates[-2]  if len(trade_dates) >= 2  else None   # 前一個交易日
+    d_prev2  = trade_dates[-3]  if len(trade_dates) >= 3  else None   # 前二個交易日
+    d_prev3  = trade_dates[-4]  if len(trade_dates) >= 4  else None   # 前三個交易日
+    d_prev6  = trade_dates[-6]  if len(trade_dates) >= 6  else None   # 五日前
+    d_prev21 = trade_dates[-21] if len(trade_dates) >= 21 else None   # 二十日前
+    log.info(f"latest_trade={latest_trade}, chg_1d base={d_prev1}, chg_5d base={d_prev6}, chg_20d base={d_prev21}")
+
+    # 買賣超序列：用 DB 日期（最新5/20個交易日）
+    net_last5  = all_dates[-5:]
+    net_last20 = all_dates[-20:]
+    net_latest = all_dates[-1]   # DB 最新交易日（可能與 XQ 最新日不同）
+    net_prev_d = all_dates[-2] if len(all_dates) >= 2 else None
 
     def pct(base_date, now_date=None) -> pd.Series:
         """計算漲跌幅：(now - base) / base × 100"""
@@ -717,14 +721,12 @@ def compute(hist_df: pd.DataFrame,
 
     # 淨買賣超：也用統一的 trade_dates 決定最後 5/20 天
     net_pv  = df.pivot_table(index="code", columns="date", values="net_yi", aggfunc="first")
-    last5   = trade_dates[-5:]
-    last20  = trade_dates[-20:]
-    net_1d  = net_pv[latest_trade].fillna(0.0)   if latest_trade    in net_pv.columns else pd.Series(0.0, index=net_pv.index)
-    net_prev = net_pv[trade_dates[-2]].fillna(0.0) if len(trade_dates) >= 2 and trade_dates[-2] in net_pv.columns else pd.Series(0.0, index=net_pv.index)
-    net_5d  = net_pv[[c for c in last5  if c in net_pv.columns]].sum(axis=1).fillna(0.0)
-    net_20d = net_pv[[c for c in last20 if c in net_pv.columns]].sum(axis=1).fillna(0.0)
+    net_1d   = net_pv[net_latest].fillna(0.0)  if net_latest  in net_pv.columns else pd.Series(0.0, index=net_pv.index)
+    net_prev = net_pv[net_prev_d].fillna(0.0)  if net_prev_d  in net_pv.columns else pd.Series(0.0, index=net_pv.index)
+    net_5d   = net_pv[[c for c in net_last5  if c in net_pv.columns]].sum(axis=1).fillna(0.0)
+    net_20d  = net_pv[[c for c in net_last20 if c in net_pv.columns]].sum(axis=1).fillna(0.0)
 
-    log.info(f"net_pv shape={net_pv.shape}, last5={last5}")
+    log.info(f"net_pv shape={net_pv.shape}, net_last5={net_last5}")
     nonzero_5d = int((net_5d != 0).sum())
     log.info(f"net_5d: min={round(float(net_5d.min()),2)}, max={round(float(net_5d.max()),2)}, nonzero={nonzero_5d}")
 
@@ -735,7 +737,7 @@ def compute(hist_df: pd.DataFrame,
     net_5d  = clamp(net_5d,  5000.0)
     net_20d = clamp(net_20d, 20000.0)
 
-    db_names = df[df["date"] == latest_trade].set_index("code")["name"].to_dict()
+    db_names = df[df["date"] == net_latest].set_index("code")["name"].to_dict()
     def get_name(code: str) -> str:
         return name_map.get(code, "") or db_names.get(code, "")
 
