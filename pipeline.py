@@ -101,17 +101,17 @@ def db_dates(n: int = 30) -> list[str]:
     return [r["date"] for r in rows if r["cnt"] >= thr][:n]
 
 
-def db_has_today() -> bool:
+def db_has_trade_date(trade_date: str) -> bool:
     dates = db_dates(1)
-    if not dates or dates[0] != TODAY:
+    if not dates or dates[0] != trade_date:
         return False
     with _db() as c:
         n = c.execute(
             "SELECT COUNT(*) FROM daily WHERE date=? AND market='TWSE' AND inst_net != 0",
-            (TODAY,)
+            (trade_date,)
         ).fetchone()[0]
     if n == 0:
-        log.info("Today's data exists but TWSE inst_net all 0, will retry")
+        log.info(f"Trade date {trade_date} exists but TWSE inst_net all 0, will retry")
         return False
     return True
 
@@ -209,10 +209,34 @@ def _calc_net_yi(volume: int, value: int, inst_net_shares: int) -> float:
     return round(inst_net_shares * avg_price / 1e8, 6)
 
 
-def fetch_twse_price_today() -> dict[str, dict]:
+def _parse_twse_date(roc_date8: str) -> str:
+    """民國年8位數字 '1150612' → '2026-06-12'"""
+    try:
+        s = str(roc_date8).strip()
+        if len(s) == 7:
+            y = int(s[:3]) + 1911
+            return f"{y}-{s[3:5]}-{s[5:7]}"
+    except Exception:
+        pass
+    return ""
+
+
+def fetch_twse_price_today() -> tuple[str, dict[str, dict]]:
+    """回傳 (trade_date, {code: {name, close, volume, value}})"""
     data = _get("https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_ALL")
     if not isinstance(data, list) or len(data) < 100:
         raise RuntimeError(f"TWSE STOCK_DAY_ALL failed: got {len(data) if data else 0} rows")
+
+    trade_date = ""
+    if data:
+        raw_date = str(data[0].get("Date", "")).strip()
+        trade_date = _parse_twse_date(raw_date)
+    if not trade_date:
+        trade_date = TODAY
+        log.warning(f"TWSE: could not parse Date field, using TODAY={TODAY}")
+    else:
+        log.info(f"TWSE price trade_date={trade_date}")
+
     result = {}
     for item in data:
         code = str(item.get("Code", "")).strip().zfill(4)
@@ -225,7 +249,7 @@ def fetch_twse_price_today() -> dict[str, dict]:
             "value":  _int(item.get("TradeValue")),
         }
     log.info(f"TWSE price (today): {len(result)} stocks")
-    return result
+    return trade_date, result
 
 
 def fetch_twse_t86(date8: str) -> dict[str, int]:
@@ -286,13 +310,25 @@ def fetch_twse_stock_month(code: str, date8: str) -> dict[str, dict]:
     return result
 
 
-def fetch_tpex_price_today() -> dict[str, dict]:
+def fetch_tpex_price_today() -> tuple[str, dict[str, dict]]:
+    """回傳 (trade_date, {code: {name, close, volume, value}})"""
     data = _get(
         "https://www.tpex.org.tw/openapi/v1/tpex_mainboard_quotes",
         headers=TPEX_HEADERS, verify=False,
     )
     if not isinstance(data, list) or len(data) < 5:
         raise RuntimeError(f"TPEx tpex_mainboard_quotes failed: got {len(data) if data else 0} rows")
+
+    trade_date = ""
+    if data:
+        raw_date = str(data[0].get("Date", "")).strip()
+        trade_date = _parse_twse_date(raw_date)
+    if not trade_date:
+        trade_date = TODAY
+        log.warning(f"TPEx: could not parse Date field, using TODAY={TODAY}")
+    else:
+        log.info(f"TPEx price trade_date={trade_date}")
+
     result = {}
     for item in data:
         code = str(item.get("SecuritiesCompanyCode", "")).strip().zfill(4)
@@ -304,11 +340,11 @@ def fetch_tpex_price_today() -> dict[str, dict]:
         result[code] = {
             "name":   item.get("CompanyName", ""),
             "close":  close,
-            "volume": _int(item.get("TradingShares",    0)),
+            "volume": _int(item.get("TradingShares",     0)),
             "value":  _int(item.get("TransactionAmount", 0)),
         }
     log.info(f"TPEx price (today): {len(result)} stocks")
-    return result
+    return trade_date, result
 
 
 def fetch_tpex_inst() -> dict[str, int]:
@@ -425,14 +461,18 @@ def fetch_group_history(group_codes: list[str],
 def fetch_today() -> pd.DataFrame:
     with ThreadPoolExecutor(max_workers=4) as pool:
         f_twse_p = pool.submit(fetch_twse_price_today)
-        f_twse_i = pool.submit(fetch_twse_t86, TODAY_8)
         f_tpex_p = pool.submit(fetch_tpex_price_today)
         f_tpex_i = pool.submit(fetch_tpex_inst)
 
-        r_twse_p = f_twse_p.result()
-        r_twse_i = f_twse_i.result()
-        r_tpex_p = f_tpex_p.result()
+        twse_date, r_twse_p = f_twse_p.result()
+        tpex_date, r_tpex_p = f_tpex_p.result()
         r_tpex_i = f_tpex_i.result()
+
+    trade_date = twse_date or tpex_date or TODAY
+    if trade_date != TODAY:
+        log.info(f"API trade_date={trade_date} (system date={TODAY}, non-trading day)")
+
+    r_twse_i = fetch_twse_t86(trade_date.replace("-", ""))
 
     log.info(f"Parallel done: TWSE {len(r_twse_p)} price/{len(r_twse_i)} inst "
              f"| TPEx {len(r_tpex_p)} price/{len(r_tpex_i)} inst")
@@ -441,7 +481,7 @@ def fetch_today() -> pd.DataFrame:
     for code, p in r_twse_p.items():
         inst = r_twse_i.get(code, 0)
         rows.append({
-            "date": TODAY, "code": code, "market": "TWSE", "name": p["name"],
+            "date": trade_date, "code": code, "market": "TWSE", "name": p["name"],
             "close_price": p["close"],
             "trade_volume": p["volume"], "trade_value": p["value"],
             "inst_net": inst, "net_yi": _calc_net_yi(p["volume"], p["value"], inst),
@@ -449,7 +489,7 @@ def fetch_today() -> pd.DataFrame:
     for code, p in r_tpex_p.items():
         inst = r_tpex_i.get(code, 0)
         rows.append({
-            "date": TODAY, "code": code, "market": "TPEx", "name": p["name"],
+            "date": trade_date, "code": code, "market": "TPEx", "name": p["name"],
             "close_price": p["close"],
             "trade_volume": p["volume"], "trade_value": p["value"],
             "inst_net": inst, "net_yi": _calc_net_yi(p["volume"], p["value"], inst),
@@ -458,7 +498,7 @@ def fetch_today() -> pd.DataFrame:
     df = pd.DataFrame(rows)
     twse_n = sum(1 for r in rows if r["market"] == "TWSE")
     tpex_n = sum(1 for r in rows if r["market"] == "TPEx")
-    log.info(f"Today total: {len(df)} stocks (TWSE={twse_n}, TPEx={tpex_n})")
+    log.info(f"Today total: {len(df)} stocks (TWSE={twse_n}, TPEx={tpex_n}), trade_date={trade_date}")
     return df
 
 
@@ -832,14 +872,20 @@ def main():
             else:
                 log.warning("Run with --reset-history to re-fetch these dates")
 
-        if args.force or not db_has_today():
+        latest_trade_date = (db_dates(1) or [None])[0]
+
+        if args.force or not (latest_trade_date and db_has_trade_date(latest_trade_date)):
             today_df = fetch_today()
             if today_df.empty:
                 log.error("Today fetch returned empty, aborting")
                 return
-            db_save(today_df)
+            actual_trade_date = today_df["date"].iloc[0]
+            if not args.force and db_has_trade_date(actual_trade_date):
+                log.info(f"[CACHE] Trade date {actual_trade_date} already in DB")
+            else:
+                db_save(today_df)
         else:
-            log.info("[CACHE] Today already in DB")
+            log.info(f"[CACHE] Latest trade date {latest_trade_date} already in DB")
 
         existing_dates = set(db_dates(25))
         if len(existing_dates) < 21 or args.reset_history:
