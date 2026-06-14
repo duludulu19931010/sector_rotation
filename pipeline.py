@@ -17,13 +17,14 @@ import requests
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 ROOT      = Path(__file__).resolve().parent
-DB_FILE   = ROOT / "db" / "market.db"
-DATA_DIR  = ROOT / "docs" / "assets" / "data"
-INPUT_DIR = ROOT / "input"
-XQ_DIR    = INPUT_DIR / "XQ"
-TPEX_DIR  = INPUT_DIR / "TPEx"
-GROUP_CSV = INPUT_DIR / "group.csv"
-LOG_FILE  = ROOT / "pipeline.log"
+DB_FILE          = ROOT / "db" / "market.db"
+DATA_DIR         = ROOT / "docs" / "assets" / "data"
+INPUT_DIR        = ROOT / "input"
+XQ_DIR           = INPUT_DIR / "XQ"
+TPEX_DIR         = INPUT_DIR / "TPEx"
+TPEX_DEALER_DIR  = INPUT_DIR / "TPExDealer"
+GROUP_CSV        = INPUT_DIR / "group.csv"
+LOG_FILE         = ROOT / "pipeline.log"
 
 TWSE_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
@@ -602,6 +603,47 @@ def load_tpex_csv_files() -> pd.DataFrame:
     return pd.concat(frames, ignore_index=True)
 
 
+def load_tpex_dealer_csv_files() -> dict[str, dict[str, int]]:
+    """
+    input/TPExDealer/TPExDealer_YYYYMMDD.csv → {date: {code: inst_net}}
+    格式：cp950，第1行說明文字，第2行欄位名，第3行起資料
+    取「三大法人買賣超股數合計」欄（最後一欄）
+    """
+    result: dict[str, dict[str, int]] = {}
+    if not TPEX_DEALER_DIR.exists():
+        return result
+    for f in sorted(TPEX_DEALER_DIR.glob("TPExDealer_*.csv")):
+        stem = f.stem.replace("TPExDealer_", "")
+        if not (len(stem) == 8 and stem.isdigit()):
+            continue
+        dd = f"{stem[:4]}-{stem[4:6]}-{stem[6:8]}"
+        try:
+            raw  = f.read_bytes()
+            text = raw.decode('cp950', errors='replace')
+            lines = text.replace('\r\n', '\n').replace('\r', '\n').split('\n')
+            data_text = '\n'.join(lines[1:])
+            df = pd.read_csv(StringIO(data_text))
+            inst_col = '三大法人買賣超股數合計'
+            if inst_col not in df.columns or '代號' not in df.columns:
+                log.warning(f"{f.name}: missing required columns, skip")
+                continue
+            day_map: dict[str, int] = {}
+            for _, row in df.iterrows():
+                code = str(row['代號']).strip().zfill(4)
+                if not code.strip('0'):
+                    continue
+                val = str(row[inst_col]).replace(',', '').strip()
+                try:
+                    day_map[code] = int(float(val))
+                except (ValueError, TypeError):
+                    pass
+            result[dd] = day_map
+            log.info(f"TPExDealer {f.name}: {len(day_map)} stocks for {dd}")
+        except Exception as e:
+            log.warning(f"Failed to load {f.name}: {e}")
+    return result
+
+
 def compute(hist_df: pd.DataFrame,
             xq_close_df: pd.DataFrame,
             groups: dict[str, list[str]],
@@ -862,14 +904,42 @@ def main():
 
     tpex_csv = load_tpex_csv_files()
     if not tpex_csv.empty:
-        tpex_to_save = tpex_csv.copy()
-        tpex_to_save["inst_net"] = 0
-        tpex_to_save["net_yi"]   = 0.0
         existing_dates = set(db_dates(25))
-        new_tpex = tpex_to_save[~tpex_to_save["date"].isin(existing_dates)]
+        new_tpex = tpex_csv[~tpex_csv["date"].isin(existing_dates)].copy()
         if not new_tpex.empty:
             log.info(f"Saving {len(new_tpex)} TPEx CSV rows for {new_tpex['date'].nunique()} new dates")
             db_save(new_tpex)
+            hist = db_load(days=25)
+
+    tpex_dealer = load_tpex_dealer_csv_files()
+    if tpex_dealer:
+        update_rows = []
+        for dd, inst_map in tpex_dealer.items():
+            for code, inst in inst_map.items():
+                if not inst:
+                    continue
+                update_rows.append((dd, code, inst))
+
+        if update_rows:
+            updated = 0
+            with _db() as c:
+                for dd, code, inst in update_rows:
+                    row = c.execute(
+                        "SELECT trade_volume, trade_value FROM daily WHERE date=? AND code=? AND market='TPEx'",
+                        (dd, code)
+                    ).fetchone()
+                    if not row:
+                        continue
+                    vol, val = row[0], row[1]
+                    avg  = _calc_avg_price(vol, val)
+                    ival = _calc_inst_value(inst, avg)
+                    nyi  = _calc_net_yi(vol, val, inst)
+                    c.execute(
+                        "UPDATE daily SET inst_net=?, inst_value=?, net_yi=? WHERE date=? AND code=? AND market='TPEx'",
+                        (inst, ival, nyi, dd, code)
+                    )
+                    updated += 1
+            log.info(f"TPExDealer: updated inst_net for {updated} rows across {len(tpex_dealer)} dates")
             hist = db_load(days=25)
 
     xq_close = load_xq_csv_files()
@@ -877,7 +947,7 @@ def main():
     export_json(records, details, hist["date"].max())
 
     with _db() as c:
-        total = c.execute("SELECT COUNT(*) FROM daily").fetchone()[0]
+        total  = c.execute("SELECT COUNT(*) FROM daily").fetchone()[0]
         latest = c.execute("SELECT MAX(date) FROM daily").fetchone()[0]
     log.info(f"DB: {total} rows, latest={latest}")
     log.info("Pipeline complete")
