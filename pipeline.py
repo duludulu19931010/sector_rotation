@@ -690,24 +690,30 @@ def compute(hist_df: pd.DataFrame,
     log.info(f"Group codes={len(all_group_codes)}, matched in close_now={len(matched)}")
 
     # 漲跌幅基準日（均基於統一的 trade_dates）
-    d_prev1  = trade_dates[-2]  if len(trade_dates) >= 2  else None   # 最後交易日前一日
-    d_prev6  = trade_dates[-6]  if len(trade_dates) >= 6  else None   # 5日前基準
-    d_prev21 = trade_dates[-21] if len(trade_dates) >= 21 else None   # 20日前基準
+    d_prev1  = trade_dates[-2]  if len(trade_dates) >= 2  else None   # 最新交易日前一日
+    d_prev2  = trade_dates[-3]  if len(trade_dates) >= 3  else None   # 最新交易日前二日
+    d_prev3  = trade_dates[-4]  if len(trade_dates) >= 4  else None   # 最新交易日前三日
+    d_prev6  = trade_dates[-6]  if len(trade_dates) >= 6  else None   # 五日前基準
+    d_prev21 = trade_dates[-21] if len(trade_dates) >= 21 else None   # 二十日前基準
     log.info(f"chg_1d base={d_prev1}, chg_5d base={d_prev6}, chg_20d base={d_prev21}")
 
-    def pct(base_date) -> pd.Series:
+    def pct(base_date, now_date=None) -> pd.Series:
+        """計算漲跌幅：(now - base) / base × 100"""
+        now_col = close_pv[now_date] if now_date and now_date in close_pv.columns else close_now
         if base_date is None or base_date not in close_pv.columns:
-            return pd.Series(0.0, index=close_now.index)
+            return pd.Series(0.0, index=now_col.index)
         base  = close_pv[base_date]
-        c     = close_now.reindex(base.index)
+        c     = now_col.reindex(base.index)
         valid = base.notna() & (base > 0.01) & c.notna() & (c > 0.01)
         s     = pd.Series(0.0, index=base.index)
         s[valid] = ((c[valid] - base[valid]) / base[valid] * 100).round(2)
         return s
 
-    chg_1d  = pct(d_prev1)
-    chg_5d  = pct(d_prev6)
-    chg_20d = pct(d_prev21)
+    chg_1d    = pct(d_prev1)                    # 最新交易日單日漲跌幅
+    chg_prev1 = pct(d_prev2, d_prev1)           # 倒數第2個交易日單日漲跌幅
+    chg_prev2 = pct(d_prev3, d_prev2)           # 倒數第3個交易日單日漲跌幅
+    chg_5d    = pct(d_prev6)                    # 五日漲跌幅
+    chg_20d   = pct(d_prev21)                   # 二十日漲跌幅
 
     # 淨買賣超：也用統一的 trade_dates 決定最後 5/20 天
     net_pv  = df.pivot_table(index="code", columns="date", values="net_yi", aggfunc="first")
@@ -741,23 +747,29 @@ def compute(hist_df: pd.DataFrame,
 
         stocks = []
         for c in codes:
-            c1  = float(chg_1d.get(c,  0) or 0)
-            c5  = float(chg_5d.get(c,  0) or 0)
-            c20 = float(chg_20d.get(c, 0) or 0)
+            c1    = float(chg_1d.get(c,    0) or 0)
+            cp1   = float(chg_prev1.get(c, 0) or 0)
+            cp2   = float(chg_prev2.get(c, 0) or 0)
+            c5    = float(chg_5d.get(c,    0) or 0)
+            c20   = float(chg_20d.get(c,   0) or 0)
             if abs(c1)  > 11:  c1  = 0.0
+            if abs(cp1) > 11:  cp1 = 0.0
+            if abs(cp2) > 11:  cp2 = 0.0
             if abs(c5)  > 60:  c5  = 0.0
             if abs(c20) > 200: c20 = 0.0
             stocks.append({
-                "code":     c,
-                "name":     get_name(c),
-                "close":    round(float(close_now.get(c, 0)), 2),
-                "net_1d":   round(float(net_1d.get(c,   0) or 0), 4),
-                "net_prev": round(float(net_prev.get(c, 0) or 0), 4),
-                "net_5d":   round(float(net_5d.get(c,   0) or 0), 4),
-                "net_20d":  round(float(net_20d.get(c,  0) or 0), 4),
-                "chg_1d":   round(c1,  2),
-                "chg_5d":   round(c5,  2),
-                "chg_20d":  round(c20, 2),
+                "code":       c,
+                "name":       get_name(c),
+                "close":      round(float(close_now.get(c, 0)), 2),
+                "net_1d":     round(float(net_1d.get(c,    0) or 0), 4),
+                "net_prev":   round(float(net_prev.get(c,  0) or 0), 4),
+                "net_5d":     round(float(net_5d.get(c,    0) or 0), 4),
+                "net_20d":    round(float(net_20d.get(c,   0) or 0), 4),
+                "chg_1d":     round(c1,  2),
+                "chg_prev1":  round(cp1, 2),
+                "chg_prev2":  round(cp2, 2),
+                "chg_5d":     round(c5,  2),
+                "chg_20d":    round(c20, 2),
             })
         stocks.sort(key=lambda x: x["net_1d"], reverse=True)
         details[gname] = stocks
@@ -766,46 +778,69 @@ def compute(hist_df: pd.DataFrame,
             records.append(_empty(gname, len(raw_codes)))
             continue
 
-        g1    = round(sum(s["net_1d"]   for s in stocks), 3)
-        g_prev= round(sum(s["net_prev"] for s in stocks), 3)
-        g5    = round(sum(s["net_5d"]   for s in stocks), 3)
-        g20   = round(sum(s["net_20d"]  for s in stocks), 3)
+        g1     = round(sum(s["net_1d"]   for s in stocks), 3)
+        g_prev = round(sum(s["net_prev"] for s in stocks), 3)
+        g5     = round(sum(s["net_5d"]   for s in stocks), 3)
+        g20    = round(sum(s["net_20d"]  for s in stocks), 3)
 
-        chg1_vals  = [s["chg_1d"]  for s in stocks if s["chg_1d"]  != 0.0]
-        chg5_vals  = [s["chg_5d"]  for s in stocks if s["chg_5d"]  != 0.0]
-        chg20_vals = [s["chg_20d"] for s in stocks if s["chg_20d"] != 0.0]
-        gc1  = round(sum(chg1_vals)  / len(chg1_vals),  2) if chg1_vals  else 0.0
-        gc5  = round(sum(chg5_vals)  / len(chg5_vals),  2) if chg5_vals  else 0.0
-        gc20 = round(sum(chg20_vals) / len(chg20_vals), 2) if chg20_vals else 0.0
+        chg1_vals   = [s["chg_1d"]    for s in stocks if s["chg_1d"]    != 0.0]
+        chgp1_vals  = [s["chg_prev1"] for s in stocks if s["chg_prev1"] != 0.0]
+        chgp2_vals  = [s["chg_prev2"] for s in stocks if s["chg_prev2"] != 0.0]
+        chg5_vals   = [s["chg_5d"]    for s in stocks if s["chg_5d"]    != 0.0]
+        chg20_vals  = [s["chg_20d"]   for s in stocks if s["chg_20d"]   != 0.0]
+
+        gc1   = round(sum(chg1_vals)  / len(chg1_vals),  2) if chg1_vals  else 0.0
+        gcp1  = round(sum(chgp1_vals) / len(chgp1_vals), 2) if chgp1_vals else 0.0
+        gcp2  = round(sum(chgp2_vals) / len(chgp2_vals), 2) if chgp2_vals else 0.0
+        gc5   = round(sum(chg5_vals)  / len(chg5_vals),  2) if chg5_vals  else 0.0
+        gc20  = round(sum(chg20_vals) / len(chg20_vals), 2) if chg20_vals else 0.0
 
         if abs(g1)   > 1000:  g1   = 0.0
         if abs(g5)   > 5000:  g5   = 0.0
         if abs(g20)  > 20000: g20  = 0.0
         if abs(gc1)  > 11:    gc1  = 0.0
+        if abs(gcp1) > 11:    gcp1 = 0.0
+        if abs(gcp2) > 11:    gcp2 = 0.0
         if abs(gc5)  > 60:    gc5  = 0.0
         if abs(gc20) > 200:   gc20 = 0.0
 
         g5_avg = g5 / 5 if g5 != 0 else 0.0
 
-        # 資金加速度（主力）：三個條件同時成立
-        #   1. 最後交易日淨買超 > 前一日淨買超
-        #   2. 最後交易日與前一日淨買超皆 > 0
-        #   3. 最後交易日與前一日淨買超皆 > 五日平均
-        is_accelerating = (
-            g1 > g_prev
-            and g1 > 0 and g_prev > 0
-            and g1 > g5_avg and g_prev > g5_avg
-        )
+        # ── 資金條件 ──────────────────────────────────────────────
+        # 正向：最新兩日淨買超 > 0 且皆 > 五日平均
+        flow_pos = (g1 > 0 and g_prev > 0
+                    and g1 > g5_avg and g_prev > g5_avg)
+        # 負向：最新兩日淨買超 < 0 且皆 < 五日平均
+        flow_neg = (g1 < 0 and g_prev < 0
+                    and g1 < g5_avg and g_prev < g5_avg)
 
-        if   is_accelerating:          label = "主力"
-        elif g5 > 0 and not is_accelerating: label = "輪動"
-        elif g5 < -2:                  label = "退潮"
-        else:                          label = "觀望"
+        # ── 價格條件 ──────────────────────────────────────────────
+        # 最新三個交易日單日漲跌幅全部 > 0
+        price_all3_pos = (gc1 > 0 and gcp1 > 0 and gcp2 > 0)
+        # 最新三個交易日單日漲跌幅任一 <= 0
+        price_any3_le0 = not price_all3_pos
+        # 五日總漲跌幅
+        chg5_pos = gc5 > 0
+
+        # ── 標籤 ──────────────────────────────────────────────────
+        # 主力：資金正向 + 最新三日全漲 + 五日總漲
+        if   flow_pos and price_all3_pos and chg5_pos:
+            label = "主力"
+        # 輪動：資金正向，但近三日有跌或五日未漲（排除主力）
+        elif flow_pos and (price_any3_le0 or not chg5_pos):
+            label = "輪動"
+        # 退潮：資金負向
+        elif flow_neg:
+            label = "退潮"
+        # 觀望：其餘
+        else:
+            label = "觀望"
 
         records.append({
             "g": gname, "cnt": len(raw_codes), "matched": len(codes),
-            "net_1d": g1, "net_5d": g5, "net_20d": g20,
-            "chg_1d": gc1, "chg_5d": gc5, "chg_20d": gc20, "label": label,
+            "net_1d": g1, "net_prev": g_prev, "net_5d": g5, "net_20d": g20,
+            "chg_1d": gc1, "chg_prev1": gcp1, "chg_prev2": gcp2,
+            "chg_5d": gc5, "chg_20d": gc20, "label": label,
         })
 
     log.info(f"Groups: {len(records)} | " +
@@ -816,8 +851,9 @@ def compute(hist_df: pd.DataFrame,
 
 def _empty(gname: str, cnt: int) -> dict:
     return {"g": gname, "cnt": cnt, "matched": 0,
-            "net_1d": 0.0, "net_5d": 0.0, "net_20d": 0.0,
-            "chg_1d": 0.0, "chg_5d": 0.0, "chg_20d": 0.0, "label": "觀望"}
+            "net_1d": 0.0, "net_prev": 0.0, "net_5d": 0.0, "net_20d": 0.0,
+            "chg_1d": 0.0, "chg_prev1": 0.0, "chg_prev2": 0.0,
+            "chg_5d": 0.0, "chg_20d": 0.0, "label": "觀望"}
 
 
 def export_json(records: list[dict], details: dict, trade_date: str) -> None:
@@ -834,11 +870,43 @@ def export_json(records: list[dict], details: dict, trade_date: str) -> None:
     def attach(filt):
         return [{**r, "stocks": details.get(r["g"], [])} for r in filt]
 
-    inflow  = attach(sorted([r for r in records if r["net_5d"] > 0 and r["chg_5d"] < 10],
-                             key=lambda x: x["net_5d"], reverse=True))
-    stealth = attach(sorted([r for r in records
-                              if r["net_1d"] > 0 and r["net_5d"] > 0 and r["chg_5d"] < 0],
-                             key=lambda x: x["net_5d"], reverse=True))
+    def flow_pos(r):
+        """資金正向：最新兩日淨買超 > 0 且皆 > 五日平均"""
+        avg = r["net_5d"] / 5 if r["net_5d"] != 0 else 0.0
+        return (r["net_1d"] > 0 and r["net_prev"] > 0
+                and r["net_1d"] > avg and r["net_prev"] > avg)
+
+    def price_any3_le(r, threshold):
+        """最近三個交易日單日漲跌幅任一天 <= threshold"""
+        return (r["chg_1d"] <= threshold
+                or r["chg_prev1"] <= threshold
+                or r["chg_prev2"] <= threshold)
+
+    # ── 流入低漲幅 ────────────────────────────────────────────────
+    # 資金正向（最新兩日淨買超 > 0 且 > 五日平均）
+    # 最近三日單日漲跌幅任一 <= 5%
+    # 五日總漲跌幅 <= 10%
+    inflow = attach(sorted(
+        [r for r in records
+         if flow_pos(r)
+         and price_any3_le(r, 5.0)
+         and r["chg_5d"] <= 10.0],
+        key=lambda x: x["net_5d"], reverse=True
+    ))
+
+    # ── 偷偷佈局 ──────────────────────────────────────────────────
+    # 最新兩日淨買超 > 0（但不需要 > 五日平均）
+    # 五日淨買超總和 < 0（整體仍在流出）
+    # 最近三日單日漲跌幅任一 <= 5%
+    # 五日總漲跌幅 <= 10%
+    stealth = attach(sorted(
+        [r for r in records
+         if r["net_1d"] > 0 and r["net_prev"] > 0
+         and r["net_5d"] < 0
+         and price_any3_le(r, 5.0)
+         and r["chg_5d"] <= 10.0],
+        key=lambda x: x["net_5d"], reverse=True
+    ))
 
     _jdump("bubble_data.json",          bubble)
     _jdump("inflow_low_gain.json",      inflow)
