@@ -106,6 +106,12 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: main
+          fetch-depth: 0
+      - name: Verify JSON exists
+        run: |
+          echo "Checking files..."
+          ls -lh docs/assets/data/
+          test -s docs/assets/data/bubble_data.json && echo "bubble_data.json OK" || (echo "bubble_data.json MISSING or empty" && exit 1)
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
