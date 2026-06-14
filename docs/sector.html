@@ -395,8 +395,8 @@ function renderBubble(data){
       min:Math.min(...allX)-xp,max:Math.max(...allX)+xp},
     yAxis:{...ax,
       name:'資金加速度・今日淨買超（億）',
-      nameLocation:'end',nameGap:12,
-      nameTextStyle:{color:'#4a6278',fontSize:14,fontFamily:'JetBrains Mono',align:'left',padding:[0,0,0,4]},
+      nameLocation:'middle',nameGap:64,nameRotate:90,
+      nameTextStyle:{color:'#4a6278',fontSize:13,fontFamily:'JetBrains Mono'},
       axisLabel:{...ax.axisLabel,formatter:v=>(v>=0?'+':'')+v.toFixed(2)},
       min:Math.min(...allY)-yp,max:Math.max(...allY)+yp},
     series:Object.entries(grp).map(([nm,pts])=>({
