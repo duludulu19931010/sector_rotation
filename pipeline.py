@@ -55,15 +55,22 @@ CREATE TABLE IF NOT EXISTS daily (
     code         TEXT NOT NULL,
     market       TEXT NOT NULL DEFAULT '',
     name         TEXT NOT NULL DEFAULT '',
-    close_price  REAL NOT NULL DEFAULT 0,
+    close_price  REAL    NOT NULL DEFAULT 0,
     trade_volume INTEGER NOT NULL DEFAULT 0,
     trade_value  INTEGER NOT NULL DEFAULT 0,
+    avg_price    REAL    NOT NULL DEFAULT 0,
     inst_net     INTEGER NOT NULL DEFAULT 0,
+    inst_value   REAL    NOT NULL DEFAULT 0,
     net_yi       REAL    NOT NULL DEFAULT 0,
     PRIMARY KEY (date, code)
 );
 CREATE INDEX IF NOT EXISTS ix_daily_date ON daily(date);
 CREATE INDEX IF NOT EXISTS ix_daily_code ON daily(code);
+"""
+
+MIGRATE_SQL = """
+ALTER TABLE daily ADD COLUMN avg_price  REAL NOT NULL DEFAULT 0;
+ALTER TABLE daily ADD COLUMN inst_value REAL NOT NULL DEFAULT 0;
 """
 
 
@@ -87,6 +94,12 @@ def _db():
 def db_init():
     with _db() as c:
         c.executescript(DDL)
+        existing_cols = {row[1] for row in c.execute("PRAGMA table_info(daily)")}
+        for col, sql in [("avg_price",  "ALTER TABLE daily ADD COLUMN avg_price  REAL NOT NULL DEFAULT 0"),
+                         ("inst_value", "ALTER TABLE daily ADD COLUMN inst_value REAL NOT NULL DEFAULT 0")]:
+            if col not in existing_cols:
+                c.execute(sql)
+                log.info(f"DB migrated: added column {col}")
     log.info(f"DB ready: {DB_FILE}")
 
 
@@ -124,7 +137,8 @@ def db_load(days: int = 25) -> pd.DataFrame:
     ph = ",".join("?" * len(dates))
     with _db() as c:
         df = pd.read_sql_query(
-            f"SELECT date,code,market,name,close_price,trade_volume,trade_value,inst_net,net_yi "
+            f"SELECT date,code,market,name,close_price,"
+            f"trade_volume,trade_value,avg_price,inst_net,inst_value,net_yi "
             f"FROM daily WHERE date IN ({ph}) ORDER BY date",
             c, params=dates
         )
@@ -135,18 +149,26 @@ def db_load(days: int = 25) -> pd.DataFrame:
 def db_save(df: pd.DataFrame) -> int:
     if df is None or df.empty:
         return 0
-    rows = [(
-        r["date"], str(r["code"]).zfill(4), r.get("market", ""),
-        r.get("name", ""),
-        _flt(r.get("close_price")),
-        _int(r.get("trade_volume")), _int(r.get("trade_value")),
-        _int(r.get("inst_net")),     _flt(r.get("net_yi")),
-    ) for _, r in df.iterrows()]
+    rows = []
+    for _, r in df.iterrows():
+        vol   = _int(r.get("trade_volume"))
+        val   = _int(r.get("trade_value"))
+        inst  = _int(r.get("inst_net"))
+        avg   = _flt(r.get("avg_price"))   if "avg_price"   in r.index and _flt(r.get("avg_price"))   != 0 else _calc_avg_price(vol, val)
+        ival  = _flt(r.get("inst_value"))  if "inst_value"  in r.index and _flt(r.get("inst_value"))  != 0 else _calc_inst_value(inst, avg)
+        netyi = _flt(r.get("net_yi"))      if "net_yi"      in r.index and _flt(r.get("net_yi"))      != 0 else _calc_net_yi(vol, val, inst)
+        rows.append((
+            r["date"], str(r["code"]).zfill(4), r.get("market", ""),
+            r.get("name", ""),
+            _flt(r.get("close_price")),
+            vol, val, avg, inst, ival, netyi,
+        ))
     with _db() as c:
         c.executemany("""
             INSERT OR REPLACE INTO daily
-            (date,code,market,name,close_price,trade_volume,trade_value,inst_net,net_yi)
-            VALUES (?,?,?,?,?,?,?,?,?)
+            (date,code,market,name,close_price,
+             trade_volume,trade_value,avg_price,inst_net,inst_value,net_yi)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?)
         """, rows)
     from collections import Counter
     for d, n in sorted(Counter(r[0] for r in rows).items()):
@@ -164,11 +186,21 @@ def _int(v) -> int:
     except: return 0
 
 
-def _calc_net_yi(volume: int, value: int, inst_net_shares: int) -> float:
+def _calc_avg_price(volume: int, value: int) -> float:
     if volume == 0:
         return 0.0
-    avg_price = value / volume
-    return round(inst_net_shares * avg_price / 1e8, 6)
+    return round(value / volume, 2)
+
+
+def _calc_inst_value(inst_net: int, avg_price: float) -> float:
+    return round(inst_net * avg_price / 1e8, 6)
+
+
+def _calc_net_yi(volume: int, value: int, inst_net: int) -> float:
+    if volume == 0:
+        return 0.0
+    avg = value / volume
+    return round(inst_net * avg / 1e8, 6)
 
 
 def _get(url: str, params: dict = None, headers: dict = None,
@@ -342,20 +374,28 @@ def fetch_today() -> pd.DataFrame:
 
     rows = []
     for code, p in r_twse_p.items():
-        inst = r_twse_i.get(code, 0)
+        inst  = r_twse_i.get(code, 0)
+        avg   = _calc_avg_price(p["volume"], p["value"])
         rows.append({
             "date": trade_date, "code": code, "market": "TWSE", "name": p["name"],
-            "close_price": p["close"],
+            "close_price":  p["close"],
             "trade_volume": p["volume"], "trade_value": p["value"],
-            "inst_net": inst, "net_yi": _calc_net_yi(p["volume"], p["value"], inst),
+            "avg_price":    avg,
+            "inst_net":     inst,
+            "inst_value":   _calc_inst_value(inst, avg),
+            "net_yi":       _calc_net_yi(p["volume"], p["value"], inst),
         })
     for code, p in r_tpex_p.items():
-        inst = r_tpex_i.get(code, 0)
+        inst  = r_tpex_i.get(code, 0)
+        avg   = _calc_avg_price(p["volume"], p["value"])
         rows.append({
             "date": trade_date, "code": code, "market": "TPEx", "name": p["name"],
-            "close_price": p["close"],
+            "close_price":  p["close"],
             "trade_volume": p["volume"], "trade_value": p["value"],
-            "inst_net": inst, "net_yi": _calc_net_yi(p["volume"], p["value"], inst),
+            "avg_price":    avg,
+            "inst_net":     inst,
+            "inst_value":   _calc_inst_value(inst, avg),
+            "net_yi":       _calc_net_yi(p["volume"], p["value"], inst),
         })
 
     df = pd.DataFrame(rows)
@@ -402,12 +442,16 @@ def fetch_twse_history(twse_codes: list[str], months: list[str],
     rows = []
     for code, day_data in price_hist.items():
         for dd, p in day_data.items():
-            inst = t86.get(dd, {}).get(code, 0)
+            inst  = t86.get(dd, {}).get(code, 0)
+            avg   = _calc_avg_price(p["volume"], p["value"])
             rows.append({
                 "date": dd, "code": code, "market": "TWSE", "name": "",
-                "close_price": 0,
+                "close_price":  0,
                 "trade_volume": p["volume"], "trade_value": p["value"],
-                "inst_net": inst, "net_yi": _calc_net_yi(p["volume"], p["value"], inst),
+                "avg_price":    avg,
+                "inst_net":     inst,
+                "inst_value":   _calc_inst_value(inst, avg),
+                "net_yi":       _calc_net_yi(p["volume"], p["value"], inst),
             })
     df = pd.DataFrame(rows)
     log.info(f"TWSE history total: {len(df)} rows")
@@ -533,14 +577,20 @@ def load_tpex_csv_files() -> pd.DataFrame:
                 log.warning(f"{f.name}: missing columns {needed - set(df.columns)}, skip")
                 continue
             df['代號'] = df['代號'].astype(str).str.strip().str.zfill(4)
-            df['close_price']  = pd.to_numeric(df['收盤'].astype(str).str.replace(',', ''), errors='coerce')
-            df['trade_volume'] = pd.to_numeric(df['成交股數'].astype(str).str.replace(',', ''), errors='coerce').fillna(0).astype(int)
-            df['trade_value']  = pd.to_numeric(df['成交金額(元)'].astype(str).str.replace(',', ''), errors='coerce').fillna(0).astype(int)
-            df['name'] = df['名稱'].astype(str).str.strip() if '名稱' in df.columns else ''
-            df['date']   = dd
-            df['code']   = df['代號']
+            df['close_price']  = pd.to_numeric(df['收盤'].astype(str).str.replace(',',''), errors='coerce')
+            df['trade_volume'] = pd.to_numeric(df['成交股數'].astype(str).str.replace(',',''), errors='coerce').fillna(0).astype(int)
+            df['trade_value']  = pd.to_numeric(df['成交金額(元)'].astype(str).str.replace(',',''), errors='coerce').fillna(0).astype(int)
+            df['avg_price']    = df.apply(lambda r: _calc_avg_price(int(r['trade_volume']), int(r['trade_value'])), axis=1)
+            df['inst_net']     = 0
+            df['inst_value']   = 0.0
+            df['net_yi']       = 0.0
+            df['name']  = df['名稱'].astype(str).str.strip() if '名稱' in df.columns else ''
+            df['date']  = dd
+            df['code']  = df['代號']
             df['market'] = 'TPEx'
-            sub = df[['date', 'code', 'market', 'name', 'close_price', 'trade_volume', 'trade_value']].copy()
+            sub = df[['date','code','market','name','close_price',
+                       'trade_volume','trade_value','avg_price',
+                       'inst_net','inst_value','net_yi']].copy()
             sub = sub.dropna(subset=['close_price'])
             sub = sub[sub['code'].str.match(r'^\d{4,6}$')]
             frames.append(sub)
