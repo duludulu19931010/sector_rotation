@@ -547,15 +547,23 @@ async function boot(){
   ]);
   ALL=ALL||[];INFLOW=INFLOW||[];STEALTH=STEALTH||[];
 
-  if(ALL.length){renderPills(ALL);renderBubble(ALL);}
-  else{
+  if(ALL.length){
+    try{
+      renderPills(ALL);
+      renderBubble(ALL);
+    }catch(e){
+      console.error('renderBubble error:',e);
+      document.getElementById('bubbleChart').innerHTML=
+        '<div class="empty"><strong>渲染錯誤</strong>'+e.message+'</div>';
+    }
+  }else{
     console.error('bubble_data.json empty or failed to load');
     document.getElementById('bubbleChart').innerHTML=
       '<div class="empty"><strong>資料載入失敗</strong>請確認 bubble_data.json 已正確推送至 GitHub Pages</div>';
   }
 
-  renderTable(INFLOW,'inflowEl');
-  renderTable(STEALTH,'stealthEl');
+  try{renderTable(INFLOW,'inflowEl');}catch(e){console.error('renderTable inflow:',e);}
+  try{renderTable(STEALTH,'stealthEl');}catch(e){console.error('renderTable stealth:',e);}
 }
 boot();
 </script>
