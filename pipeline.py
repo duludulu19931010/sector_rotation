@@ -706,7 +706,9 @@ def compute(hist_df: pd.DataFrame,
     last5   = all_dates[-5:]
     last20  = all_dates[-20:]
     net_1d  = net_pv[latest]             if latest          in net_pv.columns else pd.Series(dtype=float)
-    net_prev = net_pv[all_dates[-2]]     if len(all_dates) >= 2 and all_dates[-2] in net_pv.columns else pd.Series(dtype=float)
+    net_prev = (net_pv[all_dates[-2]].fillna(0.0)
+                if len(all_dates) >= 2 and all_dates[-2] in net_pv.columns
+                else pd.Series(0.0, index=net_pv.index))
     net_5d  = net_pv[[c for c in last5  if c in net_pv.columns]].sum(axis=1)
     net_20d = net_pv[[c for c in last20 if c in net_pv.columns]].sum(axis=1)
 
@@ -744,7 +746,7 @@ def compute(hist_df: pd.DataFrame,
                 "name":     get_name(c),
                 "close":    round(float(close_now.get(c, 0)), 2),
                 "net_1d":   round(float(net_1d.get(c,   0) or 0), 4),
-                "net_prev": round(float(net_prev.get(c,  0) or 0), 4),
+                "net_prev": round(float(net_prev.get(c, 0) or 0), 4),
                 "net_5d":   round(float(net_5d.get(c,   0) or 0), 4),
                 "net_20d":  round(float(net_20d.get(c,  0) or 0), 4),
                 "chg_1d":   round(c1,  2),
@@ -880,8 +882,19 @@ def export_csv() -> None:
 
 
 def _jdump(fname: str, data):
+    import math
+
+    def sanitize(obj):
+        if isinstance(obj, float):
+            return 0.0 if (math.isnan(obj) or math.isinf(obj)) else obj
+        if isinstance(obj, dict):
+            return {k: sanitize(v) for k, v in obj.items()}
+        if isinstance(obj, list):
+            return [sanitize(v) for v in obj]
+        return obj
+
     with open(DATA_DIR / fname, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
+        json.dump(sanitize(data), f, ensure_ascii=False, separators=(",", ":"))
 
 
 def main():
