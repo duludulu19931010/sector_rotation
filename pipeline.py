@@ -22,7 +22,6 @@ DATA_DIR         = ROOT / "docs" / "assets" / "data"
 INPUT_DIR        = ROOT / "input"
 XQ_DIR           = INPUT_DIR / "XQ"
 TPEX_DIR         = INPUT_DIR / "TPEx"
-TPEX_DEALER_DIR  = INPUT_DIR / "TPExDealer"
 GROUP_CSV        = INPUT_DIR / "group.csv"
 LOG_FILE         = ROOT / "pipeline.log"
 
@@ -952,8 +951,11 @@ def main():
 
     tpex_csv = load_tpex_csv_files()
     if not tpex_csv.empty:
-        existing_dates = set(db_dates(25))
-        new_tpex = tpex_csv[~tpex_csv["date"].isin(existing_dates)].copy()
+        with _db() as c:
+            tpex_done = {r[0] for r in c.execute(
+                "SELECT DISTINCT date FROM daily WHERE market='TPEx'"
+            ).fetchall()}
+        new_tpex = tpex_csv[~tpex_csv["date"].isin(tpex_done)].copy()
         if not new_tpex.empty:
             log.info(f"Saving {len(new_tpex)} TPEx CSV rows for {new_tpex['date'].nunique()} new dates")
             db_save(new_tpex)
@@ -961,33 +963,40 @@ def main():
 
     tpex_dealer = load_tpex_dealer_csv_files()
     if tpex_dealer:
-        update_rows = []
-        for dd, inst_map in tpex_dealer.items():
-            for code, inst in inst_map.items():
-                if not inst:
-                    continue
-                update_rows.append((dd, code, inst))
-
-        if update_rows:
-            updated = 0
-            with _db() as c:
-                for dd, code, inst in update_rows:
+        inserted = updated = 0
+        with _db() as c:
+            for dd, inst_map in tpex_dealer.items():
+                for code, inst in inst_map.items():
+                    if not inst:
+                        continue
                     row = c.execute(
-                        "SELECT trade_volume, trade_value FROM daily WHERE date=? AND code=? AND market='TPEx'",
+                        "SELECT trade_volume, trade_value, name FROM daily "
+                        "WHERE date=? AND code=? AND market='TPEx'",
                         (dd, code)
                     ).fetchone()
-                    if not row:
-                        continue
-                    vol, val = row[0], row[1]
-                    avg  = _calc_avg_price(vol, val)
-                    ival = _calc_inst_value(inst, avg)
-                    nyi  = _calc_net_yi(vol, val, inst)
-                    c.execute(
-                        "UPDATE daily SET inst_net=?, inst_value=?, net_yi=? WHERE date=? AND code=? AND market='TPEx'",
-                        (inst, ival, nyi, dd, code)
-                    )
-                    updated += 1
-            log.info(f"TPExDealer: updated inst_net for {updated} rows across {len(tpex_dealer)} dates")
+                    if row:
+                        vol, val = row[0], row[1]
+                        avg  = _calc_avg_price(vol, val)
+                        ival = _calc_inst_value(inst, avg)
+                        nyi  = _calc_net_yi(vol, val, inst)
+                        c.execute(
+                            "UPDATE daily SET inst_net=?, inst_value=?, net_yi=? "
+                            "WHERE date=? AND code=? AND market='TPEx'",
+                            (inst, ival, nyi, dd, code)
+                        )
+                        updated += 1
+                    else:
+                        name = name_map.get(code, "")
+                        c.execute("""
+                            INSERT OR IGNORE INTO daily
+                            (date,code,market,name,close_price,trade_volume,trade_value,
+                             avg_price,inst_net,inst_value,net_yi)
+                            VALUES (?,?,?,?,0,0,0,0,?,?,?)
+                        """, (dd, code, "TPEx", name, inst, 0.0, 0.0))
+                        inserted += 1
+        log.info(f"TPExDealer: updated={updated}, inserted={inserted} rows "
+                 f"across {len(tpex_dealer)} dates")
+        if inserted or updated:
             hist = db_load(days=25)
 
     xq_close = load_xq_csv_files()
