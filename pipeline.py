@@ -705,7 +705,8 @@ def compute(hist_df: pd.DataFrame,
     net_pv  = df.pivot_table(index="code", columns="date", values="net_yi", aggfunc="first")
     last5   = all_dates[-5:]
     last20  = all_dates[-20:]
-    net_1d  = net_pv[latest] if latest in net_pv.columns else pd.Series(dtype=float)
+    net_1d  = net_pv[latest]             if latest          in net_pv.columns else pd.Series(dtype=float)
+    net_prev = net_pv[all_dates[-2]]     if len(all_dates) >= 2 and all_dates[-2] in net_pv.columns else pd.Series(dtype=float)
     net_5d  = net_pv[[c for c in last5  if c in net_pv.columns]].sum(axis=1)
     net_20d = net_pv[[c for c in last20 if c in net_pv.columns]].sum(axis=1)
 
@@ -739,15 +740,16 @@ def compute(hist_df: pd.DataFrame,
             if abs(c5)  > 60:  c5  = 0.0
             if abs(c20) > 200: c20 = 0.0
             stocks.append({
-                "code":    c,
-                "name":    get_name(c),
-                "close":   round(float(close_now.get(c, 0)), 2),
-                "net_1d":  round(float(net_1d.get(c,  0) or 0), 4),
-                "net_5d":  round(float(net_5d.get(c,  0) or 0), 4),
-                "net_20d": round(float(net_20d.get(c, 0) or 0), 4),
-                "chg_1d":  round(c1,  2),
-                "chg_5d":  round(c5,  2),
-                "chg_20d": round(c20, 2),
+                "code":     c,
+                "name":     get_name(c),
+                "close":    round(float(close_now.get(c, 0)), 2),
+                "net_1d":   round(float(net_1d.get(c,   0) or 0), 4),
+                "net_prev": round(float(net_prev.get(c,  0) or 0), 4),
+                "net_5d":   round(float(net_5d.get(c,   0) or 0), 4),
+                "net_20d":  round(float(net_20d.get(c,  0) or 0), 4),
+                "chg_1d":   round(c1,  2),
+                "chg_5d":   round(c5,  2),
+                "chg_20d":  round(c20, 2),
             })
         stocks.sort(key=lambda x: x["net_1d"], reverse=True)
         details[gname] = stocks
@@ -756,9 +758,10 @@ def compute(hist_df: pd.DataFrame,
             records.append(_empty(gname, len(raw_codes)))
             continue
 
-        g1  = round(sum(s["net_1d"]  for s in stocks), 3)
-        g5  = round(sum(s["net_5d"]  for s in stocks), 3)
-        g20 = round(sum(s["net_20d"] for s in stocks), 3)
+        g1    = round(sum(s["net_1d"]   for s in stocks), 3)
+        g_prev= round(sum(s["net_prev"] for s in stocks), 3)
+        g5    = round(sum(s["net_5d"]   for s in stocks), 3)
+        g20   = round(sum(s["net_20d"]  for s in stocks), 3)
 
         chg1_vals  = [s["chg_1d"]  for s in stocks if s["chg_1d"]  != 0.0]
         chg5_vals  = [s["chg_5d"]  for s in stocks if s["chg_5d"]  != 0.0]
@@ -774,10 +777,22 @@ def compute(hist_df: pd.DataFrame,
         if abs(gc5)  > 60:    gc5  = 0.0
         if abs(gc20) > 200:   gc20 = 0.0
 
-        if   g5 > 2 and gc5 > 1:   label = "主力"
-        elif g5 > 0 and gc5 <= 1:  label = "輪動"
-        elif g5 < -2:              label = "退潮"
-        else:                      label = "觀望"
+        g5_avg = g5 / 5 if g5 != 0 else 0.0
+
+        # 資金加速度（主力）：三個條件同時成立
+        #   1. 最後交易日淨買超 > 前一日淨買超
+        #   2. 最後交易日與前一日淨買超皆 > 0
+        #   3. 最後交易日與前一日淨買超皆 > 五日平均
+        is_accelerating = (
+            g1 > g_prev
+            and g1 > 0 and g_prev > 0
+            and g1 > g5_avg and g_prev > g5_avg
+        )
+
+        if   is_accelerating:          label = "主力"
+        elif g5 > 0 and not is_accelerating: label = "輪動"
+        elif g5 < -2:                  label = "退潮"
+        else:                          label = "觀望"
 
         records.append({
             "g": gname, "cnt": len(raw_codes), "matched": len(codes),
