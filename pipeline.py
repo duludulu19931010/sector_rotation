@@ -930,15 +930,21 @@ def main():
         else:
             log.info(f"[CACHE] Latest trade date {latest_in_db} already in DB")
 
-        existing_dates = set(db_dates(25))
-        if len(existing_dates) < 21 or args.reset_history:
-            log.info(f"DB has {len(existing_dates)} trade dates, backfilling TWSE history")
+        with _db() as c:
+            n_dates = c.execute(
+                "SELECT COUNT(DISTINCT date) FROM daily WHERE market='TWSE'"
+            ).fetchone()[0]
+        log.info(f"DB has {n_dates} TWSE trade dates")
+
+        if n_dates < 21 or args.reset_history:
+            log.info(f"Backfilling TWSE history (n_dates={n_dates}, reset={args.reset_history})")
             today_db = db_load(days=1)
             twse_codes = sorted(
                 today_db[today_db["market"] == "TWSE"]["code"].astype(str).str.zfill(4).unique()
             ) if not today_db.empty else []
             months = _months_for_lookback()
             log.info(f"Backfill: {len(twse_codes)} TWSE codes, months={months}")
+            existing_dates = set(db_dates(25))
             hist_df = fetch_twse_history(twse_codes, months)
             if not hist_df.empty:
                 hist_df = hist_df[~hist_df["date"].isin(existing_dates)]
