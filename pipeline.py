@@ -831,6 +831,39 @@ def export_json(records: list[dict], details: dict, trade_date: str) -> None:
     log.info(f"JSON: bubble={len(bubble)}, inflow={len(inflow)}, stealth={len(stealth)}")
 
 
+def export_csv() -> None:
+    """
+    匯出 DB 全部資料為 CSV，欄位用中文命名，方便直接用 Excel 閱讀。
+    儲存至 docs/assets/data/market_data.csv，隨每日更新推送到 GitHub。
+    """
+    with _db() as c:
+        df = pd.read_sql_query(
+            """
+            SELECT
+                date         AS 日期,
+                code         AS 代號,
+                market       AS 市場,
+                name         AS 名稱,
+                close_price  AS 收盤價,
+                trade_volume AS 成交總股數,
+                trade_value  AS 成交總金額,
+                avg_price    AS 成交均價,
+                inst_net     AS 三大法人買賣超股數,
+                inst_value   AS 三大法人買賣超金額億
+            FROM daily
+            ORDER BY date, market, code
+            """,
+            c
+        )
+    if df.empty:
+        log.warning("export_csv: no data")
+        return
+    out = DATA_DIR / "market_data.csv"
+    df.to_csv(out, index=False, encoding="utf-8-sig")
+    log.info(f"CSV exported: {out} ({len(df):,} rows, "
+             f"{df['日期'].nunique()} dates, {df['代號'].nunique()} codes)")
+
+
 def _jdump(fname: str, data):
     with open(DATA_DIR / fname, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
@@ -945,6 +978,7 @@ def main():
     xq_close = load_xq_csv_files()
     records, details = compute(hist, xq_close, groups, name_map)
     export_json(records, details, hist["date"].max())
+    export_csv()
 
     with _db() as c:
         total  = c.execute("SELECT COUNT(*) FROM daily").fetchone()[0]
