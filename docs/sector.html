@@ -547,8 +547,11 @@ async function boot(){
   ALL=ALL||[];INFLOW=INFLOW||[];STEALTH=STEALTH||[];
 
   if(ALL.length){renderPills(ALL);renderBubble(ALL);}
-  else document.getElementById('bubbleChart').innerHTML=
-    '<div class="empty"><strong>等待資料更新</strong>請在收盤後執行 python pipeline.py</div>';
+  else{
+    console.error('bubble_data.json empty or failed to load');
+    document.getElementById('bubbleChart').innerHTML=
+      '<div class="empty"><strong>資料載入失敗</strong>請確認 bubble_data.json 已正確推送至 GitHub Pages</div>';
+  }
 
   renderTable(INFLOW,'inflowEl');
   renderTable(STEALTH,'stealthEl');
