@@ -29,6 +29,10 @@ on:
         description: "比對 tpex_mainboard_quotes 與 daily_close_quotes 欄位"
         type: boolean
         default: false
+      run_tpex_new_history_test:
+        description: "探測 TPEx 新版個股日成交資訊頁面背後的API端點"
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -70,6 +74,12 @@ jobs:
         env:
           PYTHONIOENCODING: utf-8
         run: python test_tpex_fields.py
+
+      - name: Probe TPEx new stock-pricing history endpoint
+        if: ${{ github.event.inputs.run_tpex_new_history_test == 'true' }}
+        env:
+          PYTHONIOENCODING: utf-8
+        run: python test_tpex_new_history.py
 
       - name: Run pipeline
         env:
