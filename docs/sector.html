@@ -301,8 +301,9 @@ document.querySelectorAll('.tab').forEach(t=>
 );
 
 // ── FETCH ──
+const _TS = Date.now();
 const load=async p=>{
-  try{const r=await fetch(p);if(!r.ok)throw r.status;return await r.json();}
+  try{const r=await fetch(p+'?v='+_TS);if(!r.ok)throw r.status;return await r.json();}
   catch(e){console.warn('load fail:',p,e);return null;}
 };
 
