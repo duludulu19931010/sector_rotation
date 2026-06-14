@@ -22,6 +22,7 @@ DATA_DIR         = ROOT / "docs" / "assets" / "data"
 INPUT_DIR        = ROOT / "input"
 XQ_DIR           = INPUT_DIR / "XQ"
 TPEX_DIR         = INPUT_DIR / "TPEx"
+TPEX_DEALER_DIR  = INPUT_DIR / "TPExDealer"
 GROUP_CSV        = INPUT_DIR / "group.csv"
 LOG_FILE         = ROOT / "pipeline.log"
 
