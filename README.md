@@ -1,48 +1,44 @@
 # TW$FLOW · 族群資金儀表板
 
-TWSE / TPEx 官方 API + 每日 CSV 收盤價 → SQLite 累積 → GitHub Pages  
-Self-hosted Runner（台灣本地機器）
+TWSE/TPEx 官方 API + XQ 每日收盤 CSV + TPEx 歷史 CSV → SQLite → GitHub Pages
+
+Self-hosted Runner（台灣本地機器，TPEx 不封鎖）
 
 ---
 
 ## 資料來源
 
-### 每日資料（今日，全市場一次抓取）
+### 每日自動抓取（官方 API）
 
 | 市場 | 資料 | 端點 |
 |------|------|------|
-| TWSE 上市 | 今日收盤、成交股數、成交金額 | `https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_ALL` |
-| TWSE 上市 | 三大法人買賣超 | `https://www.twse.com.tw/rwd/zh/fund/T86?date=YYYYMMDD&selectType=ALL` |
-| TPEx 上櫃 | 今日收盤、成交股數、成交金額 | `https://www.tpex.org.tw/openapi/v1/tpex_mainboard_quotes` |
-| TPEx 上櫃 | 三大法人買賣超 | `https://www.tpex.org.tw/openapi/v1/tpex_3insti_daily_trading` |
+| TWSE | 今日收盤、成交股數、成交金額 | `openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_ALL` |
+| TWSE | 三大法人買賣超（股） | `www.twse.com.tw/rwd/zh/fund/T86?date=YYYYMMDD&selectType=ALL` |
+| TPEx | 今日收盤、成交股數、成交金額 | `tpex.org.tw/openapi/v1/tpex_mainboard_quotes` |
+| TPEx | 三大法人買賣超（股） | `tpex.org.tw/openapi/v1/tpex_3insti_daily_trading` |
 
-**全市場端點若回傳資料量過少（TWSE<100 / TPEx<5）會直接 raise exception，pipeline 中止，不會存入不完整資料。**
+T86 欄位數因日期而異（16 或 19 欄），三大法人合計固定為 **最後一欄 `row[-1]`**，單位為「股」。
 
-T86：欄位數量因日期而不同（16或19欄），**三大法人買賣超股數固定為最後一欄（`row[-1]`）**，已驗證與「外陸資+外資自營商+投信+自營商」各子項加總一致。單位為「股」。
+全市場端點若回傳資料量不足（TWSE < 100 / TPEx < 5 筆）直接 raise exception，pipeline 中止，不會存入不完整資料。
 
-tpex_3insti_daily_trading：`ForeignInvestorsBuy/Sell`、`InvestmentTrustBuy/Sell`、`DealersBuy/Sell`，程式自行加總（單位「股」）。
+### 每日手動提供（CSV）
 
-### 歷史補抓（個股逐月，僅 DB 不足21個交易日時執行一次）
-
-| 市場 | 端點 | 一次回傳範圍 |
+| 資料 | 路徑 | 說明 |
 |------|------|------|
-| TWSE 上市 | `https://www.twse.com.tw/exchangeReport/STOCK_DAY?date=YYYYMM01&stockNo=代號&response=json` | 該股票整月每日收盤/成交股數/成交金額 |
-| TPEx 上櫃 | `https://www.tpex.org.tw/web/stock/aftertrading/daily_trading_info/st43_result.php?d=YYY/MM&stkno=代號` | 同上（民國年） |
-| TWSE 三大法人歷史 | `T86?date=YYYYMMDD`（逐日，全市場） | 當日全市場三大法人 |
+| 收盤價 | `input/XQ/YYYYMMDD_Data.csv` | XQ 匯出，需有 `代碼`、`成交` 欄位，支援 utf-8-sig / cp950 |
+| TPEx 歷史（過去） | `input/TPEx/TPEx_YYYYMMDD.csv` | 從 TPEx 官網下載，big5 編碼，前 2 行標題跳過 |
 
-補抓範圍：族群池全部代號（809支）× 當月+上月（涵蓋21個交易日），三大法人取自 T86 歷史逐日抓取後比對代號。
+**TPEx 個股歷史 API 端點（st43_result.php）已於 TPEx 2024/10 改版後失效**，過去資料請手動放入 `input/TPEx/`，今後資料由今日 API 每日累積。
 
-**此端點僅補「收盤價/成交股數/成交金額」，三大法人歷史仍來自 T86（已驗證可靠）。**
+### TWSE 個股歷史（自動補抓，首次執行）
 
-### CSV（收盤價，僅用於漲跌幅計算）
+DB 不足 21 個交易日時自動觸發：
 
-`input/YYYYMMDD_Data.csv`（CP950 編碼），每日手動放入，需包含欄位：
-
-```
-代碼,商品,...,成交,...
-```
-
-只使用 `代碼` 和 `成交`（收盤價）兩欄。**API 抓到的三大法人/成交金額/成交股數絕對不會被 CSV 覆蓋。**
+- 端點：`exchangeReport/STOCK_DAY?date=YYYYMM01&stockNo=代號`
+- 範圍：今日資料中全部 TWSE 代號（約 1366 支）× 當月+上月
+- 並行：8 個 parallel requests
+- 三大法人：T86 歷史逐日抓取（每次 0.3秒間隔）
+- 預估時間：首次執行 **10~20 分鐘**，之後每日 < 1 分鐘
 
 ---
 
@@ -51,35 +47,28 @@ tpex_3insti_daily_trading：`ForeignInvestorsBuy/Sell`、`InvestmentTrustBuy/Sel
 | 指標 | 公式 |
 |------|------|
 | 今日淨買賣超（億） | `三大法人買賣超股數 × 均價 ÷ 1e8`（均價 = 成交金額 ÷ 成交股數） |
-| 五日淨買賣超（億） | 最新連續五日「今日淨買賣超」之和 |
-| 二十日淨買賣超（億） | 最新連續二十日「今日淨買賣超」之和 |
-| 今日漲跌幅（%） | `(今日收盤價 − 昨日收盤價) ÷ 昨日收盤價 × 100` |
-| 五日漲跌幅（%） | `(今日收盤價 − 五日前收盤價) ÷ 五日前收盤價 × 100`（往前數第6個交易日） |
-| 二十日漲跌幅（%） | `(今日收盤價 − 二十日前收盤價) ÷ 二十日前收盤價 × 100`（往前數第21個交易日） |
+| 五日淨買賣超（億） | 最新連續 5 日「今日淨買賣超」之和 |
+| 二十日淨買賣超（億） | 最新連續 20 日「今日淨買賣超」之和 |
+| 今日漲跌幅（%） | `(今日收盤 − 昨日收盤) ÷ 昨日收盤 × 100`，來自 XQ CSV |
+| 五日漲跌幅（%） | `(今日收盤 − 五日前收盤) ÷ 五日前收盤 × 100` |
+| 二十日漲跌幅（%） | `(今日收盤 − 二十日前收盤) ÷ 二十日前收盤 × 100` |
 
-漲跌幅一律取自 **CSV 收盤價序列**；若 CSV 不足則 fallback 用 API 收盤價（僅當日有效）。
+**漲跌幅完全來自 XQ CSV 收盤價序列**；成交股數/成交金額/三大法人來自 API，絕不混用 CSV 數值。
 
-### 泡泡圖軸定義
+泡泡圖：**X 軸 = 五日淨買超（資金出入量）**，**Y 軸 = 今日淨買超（資金加速度）**
 
-| 軸 | 指標 | 意義 |
-|----|------|------|
-| **X 軸** | 五日淨買超（億） | 資金出入量（累積方向） |
-| **Y 軸** | 今日淨買超（億） | 資金加速度（當日動能） |
+### 合理範圍防護
 
-圓圈大小：五日淨買超絕對值。
+| 項目 | 上限 | 超出時 |
+|------|------|--------|
+| 今日漲跌幅 | ±11% | 歸零 |
+| 五日漲跌幅 | ±60% | 歸零 |
+| 二十日漲跌幅 | ±200% | 歸零 |
+| 今日淨買賣超 | ±1000億 | 歸零 |
+| 五日淨買賣超 | ±5000億 | 歸零 |
+| 二十日淨買賣超 | ±20000億 | 歸零 |
 
-### 合理範圍防護（資料異常自動歸零）
-
-| 項目 | 上限 |
-|------|------|
-| 今日漲跌幅 | ±11% |
-| 五日漲跌幅 | ±60% |
-| 二十日漲跌幅 | ±200% |
-| 今日淨買賣超 | ±1000億 |
-| 五日淨買賣超 | ±5000億 |
-| 二十日淨買賣超 | ±20000億 |
-
-族群層級數值**直接加總個股明細**（已套用上述防護），族群數字 = 個股明細加總，不會出現不一致。
+族群數字 = 個股明細加總（不再有矛盾）。
 
 ---
 
@@ -87,15 +76,19 @@ tpex_3insti_daily_trading：`ForeignInvestorsBuy/Sell`、`InvestmentTrustBuy/Sel
 
 ```
 ├── pipeline.py
-├── check_record.py            單筆資料檢索工具
+├── check_record.py
+├── check_db_status.py
 ├── requirements.txt
 ├── .gitignore
 ├── input/
-│   ├── Group.csv               族群個股清單（Big5，58 族群）
-│   ├── stock_list.csv          股票名稱對照（CP950，1937 筆）
-│   └── YYYYMMDD_Data.csv        每日收盤價（CP950，每天手動新增）
+│   ├── group.csv                   族群清單（cp950，寬表格，500+ 族群）
+│   ├── stock_list.csv              股票名稱對照
+│   ├── XQ/
+│   │   └── YYYYMMDD_Data.csv        XQ 每日收盤（utf-8-sig 或 cp950）
+│   └── TPEx/
+│       └── TPEx_YYYYMMDD.csv        TPEx 歷史行情（big5，前2行標題跳過）
 ├── db/
-│   └── market.db                SQLite（三大法人/成交金額/成交股數/收盤價，每日累積）
+│   └── market.db
 ├── docs/
 │   ├── index.html
 │   ├── sector.html
@@ -104,115 +97,78 @@ tpex_3insti_daily_trading：`ForeignInvestorsBuy/Sell`、`InvestmentTrustBuy/Sel
 │       ├── inflow_low_gain.json
 │       ├── stealth_accumulation.json
 │       ├── group_stats.json
-│       ├── metadata.json
-│       └── market_data.csv      DB 全量匯出
+│       └── metadata.json
 └── .github/workflows/daily.yml
 ```
 
 ---
 
-## DB 結構（單表 `daily`）
+## DB Schema（`daily` 表）
 
 | 欄位 | 說明 |
 |------|------|
-| `date` | 交易日 YYYY-MM-DD |
-| `code` | 股票代號（4位） |
+| `date` | 交易日 YYYY-MM-DD（來自 API 的 Date 欄位，非系統日期） |
+| `code` | 股票代號（4 位） |
 | `market` | TWSE / TPEx |
 | `name` | 股票名稱 |
-| `close_price` | 收盤價 |
+| `close_price` | 收盤價（API；XQ CSV 在 compute 階段覆蓋） |
 | `trade_volume` | 成交股數 |
 | `trade_value` | 成交金額（元） |
-| `inst_net` | 三大法人買賣超股數 |
+| `inst_net` | 三大法人買賣超股數（股） |
 | `net_yi` | 今日淨買賣超（億） |
 
 ---
 
-## 執行
+## 每日操作
 
-### 每日流程
+### 每天需要做的事
 
-1. 收盤後，把當日 `YYYYMMDD_Data.csv` 放入 `input/`
-2. 執行：
+1. 把當日 `YYYYMMDD_Data.csv` 放入 `input/XQ/`
+2. Actions → Run workflow（不需要勾任何參數）
 
-```bash
-python pipeline.py
-```
-
-### 首次執行 / 重建整個資料庫
+### 首次執行 / 重建資料庫
 
 ```bash
-rm db/market.db
-rm docs/assets/data/*.json
-python pipeline.py
+git rm db/market.db
+git commit -m "reset db"
+git push
 ```
 
-執行流程：
-1. 抓取**今日**全市場資料（TWSE/TPEx 價量 + 三大法人），存入 DB
-2. 偵測 DB 交易日數 < 21 → 觸發**歷史補抓**：
-   - 對族群池 809 支股票，逐股呼叫個股月歷史端點（當月+上月）
-   - 對應的三大法人改用 T86 逐日歷史
-   - 寫入 DB（不覆蓋今日資料）
-3. 從 DB 讀取近25個交易日資料 + CSV 收盤價序列，計算指標並輸出 JSON
+Actions → Run workflow（無需勾參數，DB 不存在時自動觸發 TWSE 歷史補抓，約 10~20 分鐘）。
 
-**首次執行時間：809支 × 2個月 ≈ 1600次個股請求 + 約20次T86歷史請求，預估 15-25 分鐘。** 之後每天執行，DB 已有 ≥21 個交易日，不會再觸發補抓，執行時間 < 1 分鐘。
+### TPEx 過去歷史
 
-### 選項
-
-```bash
-python pipeline.py                          # 正常（今日已存在則跳過API）
-python pipeline.py --force                   # 強制重抓今日
-python pipeline.py --reset-history --force   # 清除不完整日期並強制重新補抓歷史
-python pipeline.py --dry-run                 # 只用現有 DB + CSV 重算 JSON，不打API
-```
-
-### 查詢單筆資料
-
-```bash
-python check_record.py 2330              # 查某股票所有日期
-python check_record.py 2330 2026-06-12   # 查某股票某日
-python check_record.py --date 2026-06-12 # 查某日全市場統計
-```
+1. 到 TPEx 官網 → 上櫃股票行情 → 選日期 → 下載 CSV
+2. 重新命名為 `TPEx_YYYYMMDD.csv` 放入 `input/TPEx/`
+3. Actions → Run workflow
 
 ---
 
-## GitHub 設定
-
-### Pages
-1. repo → Settings → Pages
-2. Source 選 **`GitHub Actions`**
-
-### Runner
-self-hosted（台灣本地機器，TPEx 不封鎖）：
-
-```powershell
-.\config.cmd --url https://github.com/你的帳號/sector_rotation --token ...
-.\svc.cmd install
-.\svc.cmd start
-```
-
-repo → Settings → Actions → General → Workflow permissions → **Read and write**
-
-### workflow_dispatch 選項
+## workflow_dispatch 選項
 
 | 參數 | 說明 |
 |------|------|
-| `force` | 強制重抓今日 |
-| `reset_history` | 清除不完整日期並強制重新補抓歷史 |
-| `dry_run` | 不打API，只用現有DB+CSV重算 |
-| `check_code` | 查詢指定股票代號的完整記錄（輸出至log） |
+| `force` | 強制重抓今日（即使 DB 已有今日資料） |
+| `reset_history` | 清除並重新補抓 TWSE 歷史 |
+| `dry_run` | 不打 API，只用現有 DB + XQ 重算 JSON |
+| `purge_bad_data` | 清除 trade_value=0 的污染資料並重新補抓 |
+| `check_code` | 查詢指定股票代號的 DB 記錄（印在 log） |
+| `check_db_status` | 診斷各日期的 trade_value/inst_net/net_yi 分布 |
+| `run_tpex_new_history_test` | 探測 TPEx 新版個股行情頁面的 API 端點 |
 
 ---
 
 ## 障礙排除
 
-| 錯誤 | 原因 | 解法 |
+| 現象 | 原因 | 解法 |
 |------|------|------|
-| `RuntimeError: TWSE STOCK_DAY_ALL failed` | 今日API回應過少/異常 | 確認交易時段、重跑 |
-| `RuntimeError: TPEx tpex_mainboard_quotes failed` | TPEx API 暫時無回應 | 等待後重跑 |
-| 漲跌幅為0 | CSV 歷史天數不足 | 累積到6/21天後自動正常 |
-| 族群數字與個股明細不符 | 不應發生（族群=個股加總） | 回報並重跑 `--reset-history --force` |
-| `database is locked` | 上次執行中斷 | 刪 `db/market.db-wal`、`db/market.db-shm` |
-| 歷史補抓很慢 | 809支×2個月逐股抓取為正常現象 | 僅首次執行需要，之後不再觸發 |
+| `RuntimeError: TWSE STOCK_DAY_ALL failed` | TWSE API 今日尚未更新或回傳異常 | 確認交易時段後重跑 |
+| `RuntimeError: TPEx quotes failed` | TPEx API 暫時無回應 | 等待後重跑 |
+| 漲跌幅全部 0 | XQ CSV 不足或未放入 `input/XQ/` | 確認 CSV 放置路徑與欄位名稱 |
+| `missing required columns` | XQ CSV 缺少 `代碼` 或 `成交` 欄位 | 確認 XQ 匯出格式 |
+| TWSE 歷史補抓很慢 | 約 1366 支 × 2 個月逐股請求，正常現象 | 僅首次執行一次，之後不觸發 |
+| TPEx net_20d 需較久才正常 | TPEx 個股歷史無 API，從今日起累積 | 約 21 個交易日後完整（可手動放入 `input/TPEx/` 加速） |
+| `database is locked` | 上次執行中斷 | 刪除 `db/market.db-wal`、`db/market.db-shm` |
 
 ---
 
