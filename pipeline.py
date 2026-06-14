@@ -465,7 +465,8 @@ def fetch_today() -> pd.DataFrame:
 
 def load_close_csv_files() -> pd.DataFrame:
     """
-    讀取 input/YYYYMMDD_Data.csv（CP950），取代號和成交收盤價
+    讀取 input/YYYYMMDD_Data.csv，取代號和成交收盤價
+    支援 UTF-8-SIG（含BOM）和 CP950 兩種編碼
     回傳 DataFrame: date, code, close_price
     """
     frames = []
@@ -476,7 +477,16 @@ def load_close_csv_files() -> pd.DataFrame:
         dd = f"{date8[:4]}-{date8[4:6]}-{date8[6:8]}"
         try:
             raw = f.read_bytes()
-            text = raw.decode("cp950", errors="replace")
+            text = None
+            for enc in ("utf-8-sig", "utf-8", "cp950", "big5"):
+                try:
+                    text = raw.decode(enc)
+                    break
+                except (UnicodeDecodeError, LookupError):
+                    continue
+            if text is None:
+                text = raw.decode("cp950", errors="replace")
+
             from io import StringIO
             df = pd.read_csv(StringIO(text))
             if "代碼" not in df.columns or "成交" not in df.columns:
