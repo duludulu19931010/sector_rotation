@@ -6,39 +6,19 @@ on:
   workflow_dispatch:
     inputs:
       force:
-        description: "強制重新抓取"
+        description: "強制重新抓取今日"
         type: boolean
         default: false
       reset_history:
-        description: "重新補抓歷史（清除 TPEx=0 的日期）"
+        description: "重新補抓 TWSE 歷史"
         type: boolean
         default: false
       dry_run:
-        description: "Dry run（不打API，只用現有DB+CSV重算）"
-        type: boolean
-        default: false
-      check_code:
-        description: "查詢股票代號（留空則不查）"
-        type: string
-        default: ""
-      run_tpex_test:
-        description: "測試 TPEx daily_close_quotes 是否支援歷史日期參數"
-        type: boolean
-        default: false
-      run_tpex_fields_test:
-        description: "比對 tpex_mainboard_quotes 與 daily_close_quotes 欄位"
-        type: boolean
-        default: false
-      run_tpex_new_history_test:
-        description: "探測 TPEx 新版個股日成交資訊頁面背後的API端點"
-        type: boolean
-        default: false
-      check_db_status:
-        description: "診斷 DB 現狀（各日期 trade_value/inst_net/net_yi 分布）"
+        description: "Dry run（不打API，只用現有DB+XQ重算）"
         type: boolean
         default: false
       purge_bad_data:
-        description: "清除 trade_value=0 的污染歷史資料並重新補抓"
+        description: "清除污染資料（trade_value=0）並重新補抓"
         type: boolean
         default: false
 
@@ -71,24 +51,6 @@ jobs:
       - name: Install dependencies
         run: python -m pip install -r requirements.txt -q
 
-      - name: Test TPEx daily_close_quotes date param
-        if: ${{ github.event.inputs.run_tpex_test == 'true' }}
-        env:
-          PYTHONIOENCODING: utf-8
-        run: python test_tpex_daily_close.py
-
-      - name: Test TPEx field names
-        if: ${{ github.event.inputs.run_tpex_fields_test == 'true' }}
-        env:
-          PYTHONIOENCODING: utf-8
-        run: python test_tpex_fields.py
-
-      - name: Probe TPEx new stock-pricing history endpoint
-        if: ${{ github.event.inputs.run_tpex_new_history_test == 'true' }}
-        env:
-          PYTHONIOENCODING: utf-8
-        run: python test_tpex_new_history.py
-
       - name: Run pipeline
         env:
           PYTHONIOENCODING: utf-8
@@ -103,19 +65,6 @@ jobs:
           } else {
             python pipeline.py
           }
-
-      - name: Check record
-        if: ${{ github.event.inputs.check_code != '' }}
-        run: |
-          python check_record.py "${{ github.event.inputs.check_code }}"
-          Write-Host "---"
-          python check_record.py --date $(Get-Date -Format 'yyyy-MM-dd')
-
-      - name: Check DB status
-        if: ${{ github.event.inputs.check_db_status == 'true' }}
-        env:
-          PYTHONIOENCODING: utf-8
-        run: python check_db_status.py
 
       - name: Verify outputs
         run: |
