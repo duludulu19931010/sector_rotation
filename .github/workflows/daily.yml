@@ -90,6 +90,7 @@ jobs:
           $s = git status --porcelain
           if ($s) {
             git commit -m "data: $(Get-Date -Format 'yyyy-MM-dd HH:mm')"
+            git pull --rebase origin main
             git push
           } else {
             Write-Host "Nothing to commit"
