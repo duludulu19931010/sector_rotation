@@ -774,17 +774,20 @@ def _months_for_lookback() -> list[str]:
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--force",         action="store_true")
-    ap.add_argument("--dry-run",       action="store_true")
-    ap.add_argument("--reset-history", action="store_true",
-                    help="刪除 DB 中 TPEx 筆數為 0 的最新日期並重抓")
+    ap.add_argument("--force",          action="store_true")
+    ap.add_argument("--dry-run",        action="store_true")
+    ap.add_argument("--reset-history",  action="store_true",
+                    help="強制重新補抓歷史")
+    ap.add_argument("--purge-bad-data", action="store_true",
+                    help="清除 DB 中 trade_value=0 的污染歷史資料並重新補抓")
     args = ap.parse_args()
 
     log.info("=" * 60)
     log.info(f"TW$FLOW  {datetime.now()}  trade_date={TODAY}")
-    if args.force:         log.info("*** FORCE ***")
-    if args.dry_run:       log.info("*** DRY-RUN ***")
-    if args.reset_history: log.info("*** RESET-HISTORY ***")
+    if args.force:          log.info("*** FORCE ***")
+    if args.dry_run:        log.info("*** DRY-RUN ***")
+    if args.reset_history:  log.info("*** RESET-HISTORY ***")
+    if args.purge_bad_data: log.info("*** PURGE-BAD-DATA ***")
     log.info("=" * 60)
 
     DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -792,6 +795,20 @@ def main():
 
     groups   = load_groups()
     name_map = load_names()
+
+    if args.purge_bad_data and not args.dry_run:
+        with _db() as c:
+            result = c.execute(
+                "SELECT COUNT(*) FROM daily "
+                "WHERE trade_value=0 AND date != ?", (TODAY,)
+            ).fetchone()[0]
+            log.info(f"Purge: found {result} rows with trade_value=0 (excl. today)")
+            if result > 0:
+                c.execute(
+                    "DELETE FROM daily WHERE trade_value=0 AND date != ?", (TODAY,)
+                )
+                log.info(f"Purge: deleted {result} bad rows")
+        args.reset_history = True
 
     if not args.dry_run:
         incomplete = db_incomplete_dates()
