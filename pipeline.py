@@ -282,13 +282,35 @@ def fetch_close_yfinance(codes_market: dict[str, str], days: int = 30) -> pd.Dat
     """
     用 yfinance 批次抓取全市場收盤價歷史。
     TWSE 上市：代號.TW，TPEx 上櫃：代號.TWO
+    過濾：ETN（$7xxxxx）、非純數字代號、超過6位代號—Yahoo Finance 不支援
     回傳 DataFrame: date, code, close_price
     """
     import yfinance as yf
 
-    twse_tickers = {f"{c}.TW":  c for c, m in codes_market.items() if m == "TWSE"}
-    tpex_tickers = {f"{c}.TWO": c for c, m in codes_market.items() if m == "TPEx"}
+    def is_yf_supported(code: str) -> bool:
+        """
+        只保留 Yahoo Finance 支援的台股代號：
+        - 純數字
+        - 4位（一般股票）或 6位（ETF，如 006201）
+        - 排除 ETN：6位且開頭為 7（如 700269）
+        """
+        if not code.isdigit():
+            return False
+        if len(code) == 4:
+            return True
+        if len(code) == 6 and not code.startswith("7"):
+            return True
+        return False
+
+    twse_tickers = {f"{c}.TW":  c for c, m in codes_market.items()
+                    if m == "TWSE" and is_yf_supported(c)}
+    tpex_tickers = {f"{c}.TWO": c for c, m in codes_market.items()
+                    if m == "TPEx" and is_yf_supported(c)}
     all_tickers  = {**twse_tickers, **tpex_tickers}
+
+    skipped = len(codes_market) - len(all_tickers)
+    if skipped:
+        log.info(f"yfinance: skipped {skipped} unsupported codes (ETN/non-numeric)")
 
     if not all_tickers:
         return pd.DataFrame()
