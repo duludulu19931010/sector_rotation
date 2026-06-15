@@ -955,18 +955,19 @@ def main():
     if not args.dry_run:
         latest_in_db = (db_dates(1) or [None])[0]
 
-        if args.force or not (latest_in_db and db_has_trade_date(latest_in_db)):
-            today_df = fetch_today()
-            if today_df.empty:
-                log.error("Today fetch returned empty, aborting")
-                return
-            actual_trade_date = today_df["date"].iloc[0]
-            if not args.force and db_has_trade_date(actual_trade_date):
-                log.info(f"[CACHE] Trade date {actual_trade_date} already in DB")
-            else:
-                db_save(today_df)
+        # 每次都先抓今日 API，確認最新交易日
+        # 若 API 的交易日比 DB 更新（或 DB 沒資料），才存入
+        today_df = fetch_today()
+        if today_df.empty:
+            log.error("Today fetch returned empty, aborting")
+            return
+        actual_trade_date = today_df["date"].iloc[0]
+
+        if not args.force and latest_in_db and actual_trade_date <= latest_in_db and db_has_trade_date(actual_trade_date):
+            log.info(f"[CACHE] Trade date {actual_trade_date} already in DB, skipping save")
         else:
-            log.info(f"[CACHE] Latest trade date {latest_in_db} already in DB")
+            log.info(f"Saving trade date {actual_trade_date} (latest_in_db={latest_in_db})")
+            db_save(today_df)
 
     hist = db_load(days=25)
     if hist.empty:
