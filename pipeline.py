@@ -282,18 +282,11 @@ def fetch_close_yfinance(codes_market: dict[str, str], days: int = 30) -> pd.Dat
     """
     用 yfinance 批次抓取全市場收盤價歷史。
     TWSE 上市：代號.TW，TPEx 上櫃：代號.TWO
-    過濾：ETN（$7xxxxx）、非純數字代號、超過6位代號—Yahoo Finance 不支援
-    回傳 DataFrame: date, code, close_price
+    分批下載避免 Yahoo Finance 限速（每批 200 支，批次間休息 2 秒）
     """
     import yfinance as yf
 
     def is_yf_supported(code: str) -> bool:
-        """
-        只保留 Yahoo Finance 支援的台股代號：
-        - 純數字
-        - 4位（一般股票）或 6位（ETF，如 006201）
-        - 排除 ETN：6位且開頭為 7（如 700269）
-        """
         if not code.isdigit():
             return False
         if len(code) == 4:
@@ -315,39 +308,59 @@ def fetch_close_yfinance(codes_market: dict[str, str], days: int = 30) -> pd.Dat
     if not all_tickers:
         return pd.DataFrame()
 
-    log.info(f"yfinance: downloading {len(all_tickers)} tickers ({days}d) ...")
-    raw = yf.download(
-        list(all_tickers.keys()),
-        period=f"{days}d",
-        auto_adjust=True,
-        progress=False,
-        threads=True,
-    )
-    if raw.empty:
-        log.warning("yfinance: no data returned")
-        return pd.DataFrame()
+    ticker_list = list(all_tickers.keys())
+    batch_size  = 200
+    batches     = [ticker_list[i:i+batch_size] for i in range(0, len(ticker_list), batch_size)]
+    log.info(f"yfinance: {len(ticker_list)} tickers → {len(batches)} batches x {batch_size} ({days}d)")
 
-    try:
-        close = raw["Close"] if "Close" in raw.columns else raw["Adj Close"]
-    except Exception:
-        log.warning("yfinance: cannot find Close column")
-        return pd.DataFrame()
+    all_rows = []
+    for i, batch in enumerate(batches):
+        try:
+            raw = yf.download(
+                batch,
+                period=f"{days}d",
+                auto_adjust=True,
+                progress=False,
+                threads=True,
+            )
+            if raw.empty:
+                log.warning(f"yfinance batch {i+1}/{len(batches)}: no data")
+                continue
 
-    rows = []
-    for ticker, code in all_tickers.items():
-        if ticker not in close.columns:
-            continue
-        series = close[ticker].dropna()
-        for dt, price in series.items():
-            date_str = dt.strftime("%Y-%m-%d") if hasattr(dt, "strftime") else str(dt)[:10]
-            if price > 0:
-                rows.append({"date": date_str, "code": code, "close_price": float(price)})
+            try:
+                close = raw["Close"] if "Close" in raw.columns else raw["Adj Close"]
+            except Exception:
+                log.warning(f"yfinance batch {i+1}/{len(batches)}: cannot find Close column")
+                continue
 
-    df = pd.DataFrame(rows)
+            # 單 ticker 時 close 是 Series，多 ticker 時是 DataFrame
+            if isinstance(close, pd.Series):
+                close = close.to_frame(name=batch[0])
+
+            for ticker in batch:
+                if ticker not in close.columns:
+                    continue
+                series = close[ticker].dropna()
+                code = all_tickers[ticker]
+                for dt, price in series.items():
+                    date_str = dt.strftime("%Y-%m-%d") if hasattr(dt, "strftime") else str(dt)[:10]
+                    if price > 0:
+                        all_rows.append({"date": date_str, "code": code, "close_price": float(price)})
+
+            log.info(f"yfinance batch {i+1}/{len(batches)}: done ({len(batch)} tickers)")
+
+        except Exception as e:
+            log.warning(f"yfinance batch {i+1}/{len(batches)} failed: {e}")
+
+        if i < len(batches) - 1:
+            time.sleep(2)
+
+    df = pd.DataFrame(all_rows)
     if df.empty:
+        log.warning("yfinance: no data returned across all batches")
         return df
 
-    log.info(f"yfinance: {len(df)} records, "
+    log.info(f"yfinance total: {len(df)} records, "
              f"{df['date'].nunique()} dates, "
              f"{df['code'].nunique()} codes, "
              f"range={df['date'].min()} ~ {df['date'].max()}")
