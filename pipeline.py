@@ -428,18 +428,28 @@ def fetch_today() -> pd.DataFrame:
         tpex_date, r_tpex_p = f_tpex_p.result()
         r_tpex_i = f_tpex_i.result()
 
-    # TWSE 和 TPEx 揭露時間不同，各自使用 API 回傳的日期
-    twse_date = twse_date or TODAY
-    tpex_date = tpex_date or TODAY
-    if twse_date != tpex_date:
-        log.info(f"TWSE trade_date={twse_date}, TPEx trade_date={tpex_date} (system={TODAY})")
+    # T86 先試今日（TODAY_8），若有資料代表 TWSE 三大法人已揭露
+    # 若無資料，退回 STOCK_DAY_ALL 的日期
+    t86_today = fetch_twse_t86(TODAY_8)
+    if t86_today:
+        twse_inst_date = TODAY
+        r_twse_i = t86_today
+        log.info(f"T86 has today's data ({TODAY}), using as TWSE inst date")
     else:
-        log.info(f"trade_date={twse_date} (system={TODAY})")
+        twse_inst_date = twse_date
+        r_twse_i = fetch_twse_t86(twse_date.replace("-", ""))
+        log.info(f"T86 no data for today, using STOCK_DAY_ALL date={twse_date}")
 
-    # T86 用 TWSE 的日期（T86 是 TWSE 的三大法人資料）
-    r_twse_i = fetch_twse_t86(twse_date.replace("-", ""))
-    log.info(f"Parallel done: TWSE {len(r_twse_p)} price/{len(r_twse_i)} inst "
-             f"| TPEx {len(r_tpex_p)} price/{len(r_tpex_i)} inst")
+    # TWSE 收盤價：STOCK_DAY_ALL 若已更新到今日則用今日，否則用 API 日期
+    # 當 T86 有今日資料但 STOCK_DAY_ALL 還沒更新，TWSE 收盤價仍用 API 日期
+    # （收盤價晚揭露，三大法人已先揭露的情況）
+    if twse_inst_date == TODAY and twse_date != TODAY:
+        log.info(f"TWSE price still at {twse_date}, inst already at {twse_inst_date}")
+
+    tpex_date = tpex_date or TODAY
+
+    log.info(f"Parallel done: TWSE price {len(r_twse_p)}/{twse_date}, inst {len(r_twse_i)}/{twse_inst_date} "
+             f"| TPEx {len(r_tpex_p)}/{tpex_date} price/{len(r_tpex_i)} inst")
 
     rows = []
     for code, p in r_twse_p.items():
