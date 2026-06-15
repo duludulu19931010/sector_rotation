@@ -9,16 +9,12 @@ on:
         description: "強制重新抓取今日"
         type: boolean
         default: false
-      reset_history:
-        description: "重新補抓 TWSE 歷史"
-        type: boolean
-        default: false
       dry_run:
-        description: "Dry run（不打API，只用現有DB+XQ重算）"
+        description: "Dry run（不打API，只用現有DB重算）"
         type: boolean
         default: false
       purge_bad_data:
-        description: "清除污染資料（trade_value=0）並重新補抓"
+        description: "清除污染資料（trade_value=0）"
         type: boolean
         default: false
 
@@ -57,7 +53,6 @@ jobs:
         run: |
           $flags = @()
           if ("${{ github.event.inputs.force }}" -eq "true")          { $flags += "--force" }
-          if ("${{ github.event.inputs.reset_history }}" -eq "true")  { $flags += "--reset-history" }
           if ("${{ github.event.inputs.dry_run }}" -eq "true")        { $flags += "--dry-run" }
           if ("${{ github.event.inputs.purge_bad_data }}" -eq "true") { $flags += "--purge-bad-data" }
           if ($flags.Count -gt 0) {
