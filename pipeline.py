@@ -353,7 +353,7 @@ def fetch_close_yfinance(codes_market: dict[str, str], days: int = 30) -> pd.Dat
             log.warning(f"yfinance batch {i+1}/{len(batches)} failed: {e}")
 
         if i < len(batches) - 1:
-            time.sleep(2)
+            time.sleep(3)
 
     df = pd.DataFrame(all_rows)
     if df.empty:
