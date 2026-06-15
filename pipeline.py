@@ -20,7 +20,6 @@ ROOT      = Path(__file__).resolve().parent
 DB_FILE          = ROOT / "db" / "market.db"
 DATA_DIR         = ROOT / "docs" / "assets" / "data"
 INPUT_DIR        = ROOT / "input"
-XQ_DIR           = INPUT_DIR / "XQ"
 TPEX_DIR         = INPUT_DIR / "TPEx"
 TPEX_DEALER_DIR  = INPUT_DIR / "TPExDealer"
 GROUP_CSV        = INPUT_DIR / "group.csv"
@@ -279,29 +278,58 @@ def fetch_twse_t86(date8: str) -> dict[str, int]:
     return result
 
 
-def fetch_twse_stock_month(code: str, date8: str) -> dict[str, dict]:
-    data = _get(
-        "https://www.twse.com.tw/exchangeReport/STOCK_DAY",
-        params={"response": "json", "date": date8, "stockNo": code},
-        retries=2, delay=1.5,
+def fetch_close_yfinance(codes_market: dict[str, str], days: int = 30) -> pd.DataFrame:
+    """
+    用 yfinance 批次抓取全市場收盤價歷史。
+    TWSE 上市：代號.TW，TPEx 上櫃：代號.TWO
+    回傳 DataFrame: date, code, close_price
+    """
+    import yfinance as yf
+
+    twse_tickers = {f"{c}.TW":  c for c, m in codes_market.items() if m == "TWSE"}
+    tpex_tickers = {f"{c}.TWO": c for c, m in codes_market.items() if m == "TPEx"}
+    all_tickers  = {**twse_tickers, **tpex_tickers}
+
+    if not all_tickers:
+        return pd.DataFrame()
+
+    log.info(f"yfinance: downloading {len(all_tickers)} tickers ({days}d) ...")
+    raw = yf.download(
+        list(all_tickers.keys()),
+        period=f"{days}d",
+        auto_adjust=True,
+        progress=False,
+        threads=True,
     )
-    if not isinstance(data, dict) or data.get("stat") != "OK":
-        return {}
-    result = {}
-    for row in data.get("data", []):
-        if len(row) < 9:
+    if raw.empty:
+        log.warning("yfinance: no data returned")
+        return pd.DataFrame()
+
+    try:
+        close = raw["Close"] if "Close" in raw.columns else raw["Adj Close"]
+    except Exception:
+        log.warning("yfinance: cannot find Close column")
+        return pd.DataFrame()
+
+    rows = []
+    for ticker, code in all_tickers.items():
+        if ticker not in close.columns:
             continue
-        roc_date = str(row[0]).strip()
-        try:
-            y, m, d = roc_date.split("/")
-            dd = f"{int(y)+1911:04d}-{m}-{d}"
-        except Exception:
-            continue
-        result[dd] = {
-            "volume": _int(row[1]),
-            "value":  _int(row[2]),
-        }
-    return result
+        series = close[ticker].dropna()
+        for dt, price in series.items():
+            date_str = dt.strftime("%Y-%m-%d") if hasattr(dt, "strftime") else str(dt)[:10]
+            if price > 0:
+                rows.append({"date": date_str, "code": code, "close_price": float(price)})
+
+    df = pd.DataFrame(rows)
+    if df.empty:
+        return df
+
+    log.info(f"yfinance: {len(df)} records, "
+             f"{df['date'].nunique()} dates, "
+             f"{df['code'].nunique()} codes, "
+             f"range={df['date'].min()} ~ {df['date'].max()}")
+    return df
 
 
 def fetch_tpex_price_today() -> tuple[str, dict]:
@@ -405,67 +433,6 @@ def fetch_today() -> pd.DataFrame:
     return df
 
 
-def _fetch_twse_history_one(code: str, months: list[str]) -> tuple[str, dict]:
-    merged = {}
-    for m8 in months:
-        merged.update(fetch_twse_stock_month(code, m8))
-    return code, merged
-
-
-def fetch_twse_history(twse_codes: list[str], months: list[str],
-                        max_workers: int = 8) -> pd.DataFrame:
-    log.info(f"TWSE history backfill: {len(twse_codes)} codes x {len(months)} months (parallel={max_workers})")
-    price_hist: dict[str, dict] = {}
-    done = 0
-    with ThreadPoolExecutor(max_workers=max_workers) as pool:
-        futures = {pool.submit(_fetch_twse_history_one, code, months): code for code in twse_codes}
-        for fut in as_completed(futures):
-            code = futures[fut]
-            try:
-                _, merged = fut.result()
-                price_hist[code] = merged
-            except Exception as e:
-                log.warning(f"history fetch failed {code}: {e}")
-                price_hist[code] = {}
-            done += 1
-            if done % 200 == 0:
-                log.info(f"  TWSE history progress: {done}/{len(twse_codes)}")
-
-    all_dates = sorted({d for v in price_hist.values() for d in v.keys()})
-    log.info(f"TWSE history dates: {all_dates[0] if all_dates else 'N/A'} ~ "
-             f"{all_dates[-1] if all_dates else 'N/A'} ({len(all_dates)} dates)")
-
-    t86: dict[str, dict] = {}
-    for dd in all_dates:
-        t86[dd] = fetch_twse_t86(dd.replace("-", ""))
-        time.sleep(0.3)
-
-    rows = []
-    for code, day_data in price_hist.items():
-        for dd, p in day_data.items():
-            inst  = t86.get(dd, {}).get(code, 0)
-            avg   = _calc_avg_price(p["volume"], p["value"])
-            rows.append({
-                "date": dd, "code": code, "market": "TWSE", "name": "",
-                "close_price":  0,
-                "trade_volume": p["volume"], "trade_value": p["value"],
-                "avg_price":    avg,
-                "inst_net":     inst,
-                "inst_value":   _calc_inst_value(inst, avg),
-                "net_yi":       _calc_net_yi(p["volume"], p["value"], inst),
-            })
-    df = pd.DataFrame(rows)
-    log.info(f"TWSE history total: {len(df)} rows")
-    return df
-
-
-def _months_for_lookback() -> list[str]:
-    today = date.today()
-    this_month = today.strftime("%Y%m01")
-    prev = today.replace(day=1) - timedelta(days=1)
-    return sorted({prev.strftime("%Y%m01"), this_month})
-
-
 def load_groups() -> tuple[dict[str, list[str]], dict[str, str]]:
     """
     解析 input/group.csv（cp950 編碼）
@@ -502,55 +469,6 @@ def load_groups() -> tuple[dict[str, list[str]], dict[str, str]]:
              f"{sum(len(v) for v in groups.values())} stocks, "
              f"names: {len(name_map)}")
     return groups, name_map
-
-
-def load_xq_csv_files() -> pd.DataFrame:
-    """
-    input/XQ/YYYYMMDD_Data.csv → date, code, close_price
-    支援 utf-8-sig / cp950
-    """
-    frames = []
-    xq_dir = XQ_DIR
-    if not xq_dir.exists():
-        xq_dir = INPUT_DIR
-    for f in sorted(xq_dir.glob("*_Data.csv")):
-        date8 = f.stem.split("_")[0]
-        if not (len(date8) == 8 and date8.isdigit()):
-            continue
-        dd = f"{date8[:4]}-{date8[4:6]}-{date8[6:8]}"
-        try:
-            raw = f.read_bytes()
-            text = None
-            for enc in ("utf-8-sig", "utf-8", "cp950", "big5"):
-                try:
-                    text = raw.decode(enc)
-                    break
-                except (UnicodeDecodeError, LookupError):
-                    continue
-            if text is None:
-                text = raw.decode("cp950", errors="replace")
-            df = pd.read_csv(StringIO(text))
-            if "代碼" not in df.columns or "成交" not in df.columns:
-                log.warning(f"{f.name}: missing required columns (代碼/成交), skip")
-                continue
-            sub = df[["代碼", "成交"]].copy()
-            sub.columns = ["code", "close_price"]
-            sub["code"] = (
-                sub["code"].astype(str).str.strip()
-                .str.replace(r"\.0$", "", regex=True)
-                .str.zfill(4)
-            )
-            sub["close_price"] = pd.to_numeric(sub["close_price"], errors="coerce")
-            sub["date"] = dd
-            sub = sub.dropna(subset=["close_price"])
-            sub = sub[sub["code"].str.match(r"^\d{4,6}$")]
-            frames.append(sub[["date", "code", "close_price"]])
-            log.info(f"XQ {f.name}: {len(sub)} rows for {dd}")
-        except Exception as e:
-            log.warning(f"Failed to load {f.name}: {e}")
-    if not frames:
-        return pd.DataFrame()
-    return pd.concat(frames, ignore_index=True)
 
 
 def load_tpex_csv_files() -> pd.DataFrame:
@@ -645,7 +563,7 @@ def load_tpex_dealer_csv_files() -> dict[str, dict[str, int]]:
 
 
 def compute(hist_df: pd.DataFrame,
-            xq_close_df: pd.DataFrame,
+            yf_close_df: pd.DataFrame,
             groups: dict[str, list[str]],
             name_map: dict[str, str]) -> tuple[list[dict], dict[str, list[dict]]]:
     if hist_df.empty:
@@ -659,24 +577,23 @@ def compute(hist_df: pd.DataFrame,
     latest    = all_dates[-1]
     log.info(f"Dates in DB: {all_dates[0]} ~ {latest} ({len(all_dates)} days)")
 
-    if not xq_close_df.empty:
-        xq = xq_close_df.copy()
-        xq["code"] = xq["code"].astype(str).str.zfill(4)
-        xq["date"] = xq["date"].astype(str)
-        close_pv    = xq.pivot_table(index="code", columns="date", values="close_price", aggfunc="first")
+    if not yf_close_df.empty:
+        yf = yf_close_df.copy()
+        yf["code"] = yf["code"].astype(str).str.zfill(4)
+        yf["date"] = yf["date"].astype(str)
+        close_pv    = yf.pivot_table(index="code", columns="date", values="close_price", aggfunc="first")
         close_dates = sorted(close_pv.columns)
-        log.info(f"XQ close dates: {close_dates[0]} ~ {close_dates[-1]} ({len(close_dates)} days)")
+        log.info(f"yfinance close dates: {close_dates[0]} ~ {close_dates[-1]} ({len(close_dates)} days)")
     else:
         close_pv    = df.pivot_table(index="code", columns="date", values="close_price", aggfunc="first")
         close_dates = sorted(close_pv.columns)
-        log.warning("No XQ close data, using API close_price fallback")
+        log.warning("No yfinance close data, using API close_price fallback")
 
-    # 漲跌幅序列：純粹用 XQ CSV 的日期（不與 DB 取交集）
+    # 漲跌幅序列：用 yfinance 日期（不與 DB 取交集）
     # 買賣超序列：用 DB 的日期
-    # latest_trade = XQ 最新日期（即最新收盤資料日）
     trade_dates  = close_dates
     latest_trade = trade_dates[-1]
-    log.info(f"XQ trade dates: {trade_dates[0]} ~ {latest_trade} ({len(trade_dates)} days)")
+    log.info(f"yfinance trade dates: {trade_dates[0]} ~ {latest_trade} ({len(trade_dates)} days)")
 
     if latest_trade in close_pv.columns:
         close_now = close_pv[latest_trade].dropna()
@@ -976,8 +893,7 @@ def _jdump(fname: str, data):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--force",          action="store_true", help="強制重抓今日")
-    ap.add_argument("--dry-run",        action="store_true", help="只用現有DB+XQ重算，不打API")
-    ap.add_argument("--reset-history",  action="store_true", help="強制重新補抓TWSE歷史")
+    ap.add_argument("--dry-run",        action="store_true", help="只用現有DB，不打API")
     ap.add_argument("--purge-bad-data", action="store_true", help="清除trade_value=0的污染資料並重新補抓")
     args = ap.parse_args()
 
@@ -985,7 +901,6 @@ def main():
     log.info(f"TW$FLOW  {datetime.now()}  system_date={TODAY}")
     if args.force:          log.info("*** FORCE ***")
     if args.dry_run:        log.info("*** DRY-RUN ***")
-    if args.reset_history:  log.info("*** RESET-HISTORY ***")
     if args.purge_bad_data: log.info("*** PURGE-BAD-DATA ***")
     log.info("=" * 60)
 
@@ -1001,7 +916,6 @@ def main():
             if n > 0:
                 c.execute("DELETE FROM daily WHERE trade_value=0")
                 log.info(f"Purge: deleted {n} bad rows")
-        args.reset_history = True
 
     if not args.dry_run:
         latest_in_db = (db_dates(1) or [None])[0]
@@ -1019,32 +933,10 @@ def main():
         else:
             log.info(f"[CACHE] Latest trade date {latest_in_db} already in DB")
 
-        with _db() as c:
-            n_dates = c.execute(
-                "SELECT COUNT(DISTINCT date) FROM daily WHERE market='TWSE'"
-            ).fetchone()[0]
-        log.info(f"DB has {n_dates} TWSE trade dates")
-
-        if n_dates < 21 or args.reset_history:
-            log.info(f"Backfilling TWSE history (n_dates={n_dates}, reset={args.reset_history})")
-            today_db = db_load(days=1)
-            twse_codes = sorted(
-                today_db[today_db["market"] == "TWSE"]["code"].astype(str).str.zfill(4).unique()
-            ) if not today_db.empty else []
-            months = _months_for_lookback()
-            log.info(f"Backfill: {len(twse_codes)} TWSE codes, months={months}")
-            existing_dates = set(db_dates(25))
-            hist_df = fetch_twse_history(twse_codes, months)
-            if not hist_df.empty:
-                hist_df = hist_df[~hist_df["date"].isin(existing_dates)]
-                if not hist_df.empty:
-                    db_save(hist_df)
-
     hist = db_load(days=25)
     if hist.empty:
         log.error("No data in DB")
         return
-
     tpex_csv = load_tpex_csv_files()
     if not tpex_csv.empty:
         with _db() as c:
@@ -1095,8 +987,17 @@ def main():
         if inserted or updated:
             hist = db_load(days=25)
 
-    xq_close = load_xq_csv_files()
-    records, details = compute(hist, xq_close, groups, name_map)
+    # ── yfinance 收盤價歷史（漲跌幅計算用）────────────────────────
+    hist = db_load(days=25)  # reload after TPExDealer updates
+    codes_market = {}
+    if not hist.empty:
+        codes_market = dict(zip(
+            hist["code"].astype(str).str.zfill(4),
+            hist["market"]
+        ))
+    yf_close = fetch_close_yfinance(codes_market, days=35)
+
+    records, details = compute(hist, yf_close, groups, name_map)
     export_json(records, details, hist["date"].max())
     export_csv()
 
