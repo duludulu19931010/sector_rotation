@@ -428,11 +428,16 @@ def fetch_today() -> pd.DataFrame:
         tpex_date, r_tpex_p = f_tpex_p.result()
         r_tpex_i = f_tpex_i.result()
 
-    trade_date = twse_date or tpex_date or TODAY
-    if trade_date != TODAY:
-        log.info(f"API trade_date={trade_date} (system date={TODAY})")
+    # TWSE 和 TPEx 揭露時間不同，各自使用 API 回傳的日期
+    twse_date = twse_date or TODAY
+    tpex_date = tpex_date or TODAY
+    if twse_date != tpex_date:
+        log.info(f"TWSE trade_date={twse_date}, TPEx trade_date={tpex_date} (system={TODAY})")
+    else:
+        log.info(f"trade_date={twse_date} (system={TODAY})")
 
-    r_twse_i = fetch_twse_t86(trade_date.replace("-", ""))
+    # T86 用 TWSE 的日期（T86 是 TWSE 的三大法人資料）
+    r_twse_i = fetch_twse_t86(twse_date.replace("-", ""))
     log.info(f"Parallel done: TWSE {len(r_twse_p)} price/{len(r_twse_i)} inst "
              f"| TPEx {len(r_tpex_p)} price/{len(r_tpex_i)} inst")
 
@@ -441,7 +446,7 @@ def fetch_today() -> pd.DataFrame:
         inst  = r_twse_i.get(code, 0)
         avg   = _calc_avg_price(p["volume"], p["value"])
         rows.append({
-            "date": trade_date, "code": code, "market": "TWSE", "name": p["name"],
+            "date": twse_date, "code": code, "market": "TWSE", "name": p["name"],
             "close_price":  p["close"],
             "trade_volume": p["volume"], "trade_value": p["value"],
             "avg_price":    avg,
@@ -453,7 +458,7 @@ def fetch_today() -> pd.DataFrame:
         inst  = r_tpex_i.get(code, 0)
         avg   = _calc_avg_price(p["volume"], p["value"])
         rows.append({
-            "date": trade_date, "code": code, "market": "TPEx", "name": p["name"],
+            "date": tpex_date, "code": code, "market": "TPEx", "name": p["name"],
             "close_price":  p["close"],
             "trade_volume": p["volume"], "trade_value": p["value"],
             "avg_price":    avg,
@@ -463,8 +468,9 @@ def fetch_today() -> pd.DataFrame:
         })
 
     df = pd.DataFrame(rows)
-    log.info(f"Today total: {len(df)} stocks (TWSE={sum(1 for r in rows if r['market']=='TWSE')}, "
-             f"TPEx={sum(1 for r in rows if r['market']=='TPEx')}), trade_date={trade_date}")
+    log.info(f"Today total: {len(df)} stocks "
+             f"(TWSE={sum(1 for r in rows if r['market']=='TWSE')} [{twse_date}], "
+             f"TPEx={sum(1 for r in rows if r['market']=='TPEx')} [{tpex_date}])")
     return df
 
 
@@ -955,19 +961,31 @@ def main():
     if not args.dry_run:
         latest_in_db = (db_dates(1) or [None])[0]
 
-        # 每次都先抓今日 API，確認最新交易日
-        # 若 API 的交易日比 DB 更新（或 DB 沒資料），才存入
         today_df = fetch_today()
         if today_df.empty:
             log.error("Today fetch returned empty, aborting")
             return
-        actual_trade_date = today_df["date"].iloc[0]
 
-        if not args.force and latest_in_db and actual_trade_date <= latest_in_db and db_has_trade_date(actual_trade_date):
-            log.info(f"[CACHE] Trade date {actual_trade_date} already in DB, skipping save")
-        else:
-            log.info(f"Saving trade date {actual_trade_date} (latest_in_db={latest_in_db})")
-            db_save(today_df)
+        # TWSE 和 TPEx 可能日期不同，分別判斷是否需要存入
+        to_save = []
+        for market in ["TWSE", "TPEx"]:
+            mdf = today_df[today_df["market"] == market]
+            if mdf.empty:
+                continue
+            mdate = mdf["date"].iloc[0]
+            with _db() as c:
+                exists = c.execute(
+                    "SELECT COUNT(*) FROM daily WHERE date=? AND market=? AND inst_net!=0",
+                    (mdate, market)
+                ).fetchone()[0]
+            if not args.force and exists > 0:
+                log.info(f"[CACHE] {market} {mdate} already in DB")
+            else:
+                log.info(f"Saving {market} {mdate} ({len(mdf)} rows)")
+                to_save.append(mdf)
+
+        if to_save:
+            db_save(pd.concat(to_save, ignore_index=True))
 
     hist = db_load(days=25)
     if hist.empty:
