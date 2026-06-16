@@ -17,6 +17,10 @@ on:
         description: "清除污染資料（trade_value=0）"
         type: boolean
         default: false
+      probe_apis:
+        description: "探測 TWSE/TPEx 歷史 API 端點"
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -46,6 +50,12 @@ jobs:
 
       - name: Install dependencies
         run: python -m pip install -r requirements.txt -q
+
+      - name: Probe TWSE/TPEx history APIs
+        if: ${{ github.event.inputs.probe_apis == 'true' }}
+        env:
+          PYTHONIOENCODING: utf-8
+        run: python test_twse_apis.py
 
       - name: Run pipeline
         env:
