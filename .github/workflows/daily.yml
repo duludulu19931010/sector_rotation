@@ -9,6 +9,10 @@ on:
         description: "強制重新抓取今日"
         type: boolean
         default: false
+      reset_history:
+        description: "強制重新補抓 TWSE 歷史（近30天）"
+        type: boolean
+        default: false
       dry_run:
         description: "Dry run（不打API，只用現有DB重算）"
         type: boolean
@@ -63,6 +67,7 @@ jobs:
         run: |
           $flags = @()
           if ("${{ github.event.inputs.force }}" -eq "true")          { $flags += "--force" }
+          if ("${{ github.event.inputs.reset_history }}" -eq "true")  { $flags += "--reset-history" }
           if ("${{ github.event.inputs.dry_run }}" -eq "true")        { $flags += "--dry-run" }
           if ("${{ github.event.inputs.purge_bad_data }}" -eq "true") { $flags += "--purge-bad-data" }
           if ($flags.Count -gt 0) {
