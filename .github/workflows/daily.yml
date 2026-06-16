@@ -6,11 +6,11 @@ on:
   workflow_dispatch:
     inputs:
       force:
-        description: "強制重新抓取今日"
+        description: "強制重抓今日"
         type: boolean
         default: false
       reset_history:
-        description: "強制重新補抓 TWSE 歷史（近30天）"
+        description: "重新補抓 TWSE 歷史（近30天）"
         type: boolean
         default: false
       dry_run:
@@ -19,10 +19,6 @@ on:
         default: false
       purge_bad_data:
         description: "清除污染資料（trade_value=0）"
-        type: boolean
-        default: false
-      probe_apis:
-        description: "探測 TWSE/TPEx 歷史 API 端點"
         type: boolean
         default: false
 
@@ -55,42 +51,28 @@ jobs:
       - name: Install dependencies
         run: python -m pip install -r requirements.txt -q
 
-      - name: Probe TWSE/TPEx history APIs
-        if: ${{ github.event.inputs.probe_apis == 'true' }}
-        env:
-          PYTHONIOENCODING: utf-8
-        run: python test_twse_apis.py
-
       - name: Run pipeline
         env:
           PYTHONIOENCODING: utf-8
         run: |
           $flags = @()
-          if ("${{ github.event.inputs.force }}" -eq "true")          { $flags += "--force" }
-          if ("${{ github.event.inputs.reset_history }}" -eq "true")  { $flags += "--reset-history" }
-          if ("${{ github.event.inputs.dry_run }}" -eq "true")        { $flags += "--dry-run" }
+          if ("${{ github.event.inputs.force }}"          -eq "true") { $flags += "--force" }
+          if ("${{ github.event.inputs.reset_history }}"  -eq "true") { $flags += "--reset-history" }
+          if ("${{ github.event.inputs.dry_run }}"        -eq "true") { $flags += "--dry-run" }
           if ("${{ github.event.inputs.purge_bad_data }}" -eq "true") { $flags += "--purge-bad-data" }
-          if ($flags.Count -gt 0) {
-            python pipeline.py @flags
-          } else {
-            python pipeline.py
-          }
+          if ($flags.Count -gt 0) { python pipeline.py @flags } else { python pipeline.py }
 
       - name: Verify outputs
         run: |
           $files = @(
             "docs\assets\data\bubble_data.json",
-            "docs\assets\data\inflow_low_gain.json",
-            "docs\assets\data\stealth_accumulation.json",
             "docs\assets\data\metadata.json",
             "db\market.db"
           )
-          $ok = $true
           foreach ($f in $files) {
             if (Test-Path $f) { Write-Host "OK  $f  ($((Get-Item $f).Length) bytes)" }
-            else { Write-Host "MISSING  $f"; $ok = $false }
+            else { Write-Error "MISSING: $f"; exit 1 }
           }
-          if (-not $ok) { exit 1 }
 
       - name: Commit & push
         run: |
@@ -118,11 +100,9 @@ jobs:
         with:
           ref: main
           fetch-depth: 0
-      - name: Verify JSON exists
+      - name: Verify JSON
         run: |
-          echo "Checking files..."
-          ls -lh docs/assets/data/
-          test -s docs/assets/data/bubble_data.json && echo "bubble_data.json OK" || (echo "bubble_data.json MISSING or empty" && exit 1)
+          test -s docs/assets/data/bubble_data.json && echo "OK" || (echo "bubble_data.json missing"; exit 1)
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
