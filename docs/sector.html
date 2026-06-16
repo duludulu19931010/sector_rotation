@@ -303,8 +303,12 @@ document.querySelectorAll('.tab').forEach(t=>
 // ── FETCH ──
 const _TS = Date.now();
 const load=async p=>{
-  try{const r=await fetch(p+'?v='+_TS);if(!r.ok)throw r.status;return await r.json();}
-  catch(e){console.warn('load fail:',p,e);return null;}
+  try{
+    const r=await fetch(p+'?v='+_TS);
+    if(!r.ok)throw r.status;
+    const text=await r.text();
+    return JSON.parse(text);
+  }catch(e){console.warn('load fail:',p,e);return null;}
 };
 
 // ── FORMAT ──
