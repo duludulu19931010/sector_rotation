@@ -256,6 +256,76 @@ def fetch_twse_price_today() -> tuple[str, dict]:
     return trade_date, result
 
 
+def fetch_twse_all_by_date(date8: str) -> dict[str, dict]:
+    """
+    www.twse.com.tw/exchangeReport/STOCK_DAY_ALL?date=YYYYMMDD
+    回傳指定交易日全市場成交資料 {code: {close, volume, value}}
+    欄位：[代號, 名稱, 成交股數, 成交金額, 收盤價, ...]
+    """
+    data = _get(
+        "https://www.twse.com.tw/exchangeReport/STOCK_DAY_ALL",
+        params={"response": "json", "date": date8},
+        retries=2, delay=2.0,
+    )
+    if not isinstance(data, dict) or data.get("stat") != "OK":
+        return {}
+    rows = data.get("data", [])
+    result = {}
+    for row in rows:
+        if len(row) < 5:
+            continue
+        code  = str(row[0]).strip().zfill(4)
+        if not code.strip("0"):
+            continue
+        result[code] = {
+            "close":  _flt(row[4]),
+            "volume": _int(row[2]),
+            "value":  _int(row[3]),
+        }
+    log.info(f"TWSE STOCK_DAY_ALL {date8}: {len(result)} stocks")
+    return result
+
+
+def fetch_twse_history_by_date(dates: list[str]) -> pd.DataFrame:
+    """
+    用 www.twse.com.tw/exchangeReport/STOCK_DAY_ALL?date= 逐日補抓 TWSE 歷史
+    dates: ['2026-06-12', '2026-06-11', ...]
+    每日一次請求（全市場），比逐股快很多
+    """
+    if not dates:
+        return pd.DataFrame()
+
+    log.info(f"TWSE history backfill: {len(dates)} dates via STOCK_DAY_ALL")
+    rows = []
+    for i, dd in enumerate(sorted(dates)):
+        d8 = dd.replace("-", "")
+        price_data = fetch_twse_all_by_date(d8)
+        if not price_data:
+            log.warning(f"TWSE history {dd}: no data")
+            time.sleep(1.0)
+            continue
+        t86 = fetch_twse_t86(d8)
+        for code, p in price_data.items():
+            inst = t86.get(code, 0)
+            avg  = _calc_avg_price(p["volume"], p["value"])
+            rows.append({
+                "date": dd, "code": code, "market": "TWSE", "name": "",
+                "close_price":  p["close"],
+                "trade_volume": p["volume"], "trade_value": p["value"],
+                "avg_price":    avg,
+                "inst_net":     inst,
+                "inst_value":   _calc_inst_value(inst, avg),
+                "net_yi":       _calc_net_yi(p["volume"], p["value"], inst),
+            })
+        log.info(f"  TWSE history {dd}: {len(price_data)} stocks, T86={len(t86)}")
+        if i < len(dates) - 1:
+            time.sleep(0.5)
+
+    df = pd.DataFrame(rows)
+    log.info(f"TWSE history total: {len(df)} rows across {df['date'].nunique() if not df.empty else 0} dates")
+    return df
+
+
 def fetch_twse_t86(date8: str) -> dict[str, int]:
     data = _get(
         "https://www.twse.com.tw/rwd/zh/fund/T86",
@@ -420,36 +490,40 @@ def fetch_tpex_inst() -> dict[str, int]:
 
 
 def fetch_today() -> pd.DataFrame:
+    """
+    STOCK_DAY_ALL 永遠只有前一個交易日的資料（T-1）。
+    T86 和 TPEx API 在收盤後當日更新。
+    策略：
+    - TWSE 三大法人（inst_net）：用 T86，日期以 TODAY 試，若無則退回 STOCK_DAY_ALL 的日期
+    - TWSE 收盤/成交量/金額：來自 STOCK_DAY_ALL（T-1），更新到 T86 對應的日期
+    - TPEx 全部：當日
+    """
     with ThreadPoolExecutor(max_workers=3) as pool:
         f_twse_p = pool.submit(fetch_twse_price_today)
         f_tpex_p = pool.submit(fetch_tpex_price_today)
         f_tpex_i = pool.submit(fetch_tpex_inst)
-        twse_date, r_twse_p = f_twse_p.result()
+        twse_day_all_date, r_twse_p = f_twse_p.result()
         tpex_date, r_tpex_p = f_tpex_p.result()
         r_tpex_i = f_tpex_i.result()
 
-    # T86 先試今日（TODAY_8），若有資料代表 TWSE 三大法人已揭露
-    # 若無資料，退回 STOCK_DAY_ALL 的日期
+    # T86 先試今日，若有資料代表今日三大法人已揭露
     t86_today = fetch_twse_t86(TODAY_8)
     if t86_today:
-        twse_inst_date = TODAY
-        r_twse_i = t86_today
-        log.info(f"T86 has today's data ({TODAY}), using as TWSE inst date")
+        twse_date = TODAY
+        r_twse_i  = t86_today
+        log.info(f"T86: {TODAY} data available ({len(t86_today)} entries)")
     else:
-        twse_inst_date = twse_date
-        r_twse_i = fetch_twse_t86(twse_date.replace("-", ""))
-        log.info(f"T86 no data for today, using STOCK_DAY_ALL date={twse_date}")
-
-    # TWSE 收盤價：STOCK_DAY_ALL 若已更新到今日則用今日，否則用 API 日期
-    # 當 T86 有今日資料但 STOCK_DAY_ALL 還沒更新，TWSE 收盤價仍用 API 日期
-    # （收盤價晚揭露，三大法人已先揭露的情況）
-    if twse_inst_date == TODAY and twse_date != TODAY:
-        log.info(f"TWSE price still at {twse_date}, inst already at {twse_inst_date}")
+        # 退回 STOCK_DAY_ALL 的日期（T-1）
+        twse_date = twse_day_all_date or TODAY
+        r_twse_i  = fetch_twse_t86(twse_date.replace("-", ""))
+        log.info(f"T86: no data for {TODAY}, using {twse_date}")
 
     tpex_date = tpex_date or TODAY
 
-    log.info(f"Parallel done: TWSE price {len(r_twse_p)}/{twse_date}, inst {len(r_twse_i)}/{twse_inst_date} "
-             f"| TPEx {len(r_tpex_p)}/{tpex_date} price/{len(r_tpex_i)} inst")
+    log.info(f"TWSE: price={twse_day_all_date}(T-1 STOCK_DAY_ALL), "
+             f"inst={twse_date}(T86) | TPEx: {tpex_date}")
+    log.info(f"TWSE {len(r_twse_p)} price/{len(r_twse_i)} inst "
+             f"| TPEx {len(r_tpex_p)} price/{len(r_tpex_i)} inst")
 
     rows = []
     for code, p in r_twse_p.items():
@@ -945,13 +1019,15 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--force",          action="store_true", help="強制重抓今日")
     ap.add_argument("--dry-run",        action="store_true", help="只用現有DB，不打API")
-    ap.add_argument("--purge-bad-data", action="store_true", help="清除trade_value=0的污染資料並重新補抓")
+    ap.add_argument("--reset-history",  action="store_true", help="強制重新補抓TWSE歷史")
+    ap.add_argument("--purge-bad-data", action="store_true", help="清除trade_value=0的污染資料")
     args = ap.parse_args()
 
     log.info("=" * 60)
     log.info(f"TW$FLOW  {datetime.now()}  system_date={TODAY}")
     if args.force:          log.info("*** FORCE ***")
     if args.dry_run:        log.info("*** DRY-RUN ***")
+    if args.reset_history:  log.info("*** RESET-HISTORY ***")
     if args.purge_bad_data: log.info("*** PURGE-BAD-DATA ***")
     log.info("=" * 60)
 
@@ -996,6 +1072,36 @@ def main():
 
         if to_save:
             db_save(pd.concat(to_save, ignore_index=True))
+
+    # ── TWSE 歷史補抓（每日全市場，比逐股快）────────────────────────
+    if not args.dry_run:
+        with _db() as c:
+            twse_dates = {r[0] for r in c.execute(
+                "SELECT DISTINCT date FROM daily WHERE market='TWSE'"
+            ).fetchall()}
+        yf_dates = set()
+        # 用 yfinance 的日期序列作為「應有的交易日」參考
+        # 取最近 30 天的 TWSE 日期，找出 DB 缺少的
+        n_twse = len(twse_dates)
+        if n_twse < 21 or args.reset_history:
+            # 從 yfinance 取一支股票的歷史日期作為交易日曆
+            try:
+                import yfinance as yf
+                cal = yf.download("2330.TW", period="30d",
+                                  auto_adjust=True, progress=False)
+                if not cal.empty:
+                    yf_dates = {str(d)[:10] for d in cal.index}
+            except Exception as e:
+                log.warning(f"yfinance calendar fetch failed: {e}")
+
+            missing = sorted(yf_dates - twse_dates)
+            if missing:
+                log.info(f"TWSE history: DB has {n_twse} dates, missing {len(missing)}: {missing}")
+                hist_df = fetch_twse_history_by_date(missing)
+                if not hist_df.empty:
+                    db_save(hist_df)
+            else:
+                log.info(f"TWSE history: DB has {n_twse} dates, no missing dates")
 
     hist = db_load(days=25)
     if hist.empty:
