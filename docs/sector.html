@@ -135,13 +135,6 @@ body::before{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;
 .screener-table td{padding:7px 8px;border-bottom:1px solid rgba(26,37,53,.3);font-family:var(--mono)}
 .screener-table td:first-child,.screener-table td:nth-child(2){font-family:var(--sans)}
 .screener-empty{text-align:center;padding:30px;color:var(--dm);font-family:var(--mono);font-size:15px}
-.disc-btn{position:fixed;bottom:22px;right:22px;z-index:100;
-  background:rgba(240,62,42,.12);border:1px solid rgba(240,62,42,.35);
-  color:var(--red);font-family:var(--mono);font-size:14px;
-  padding:9px 16px;border-radius:6px;cursor:pointer;
-  display:flex;align-items:center;gap:7px;transition:all .15s;
-  backdrop-filter:blur(8px)}
-.disc-btn:hover{background:rgba(240,62,42,.2);border-color:var(--red)}
 .disc-text{font-family:var(--sans);font-size:14px;color:var(--dm);margin-bottom:12px;line-height:1.6;padding:10px 14px;background:var(--s2);border-radius:5px;border:1px solid var(--ln)}
 @media(max-width:768px){
   .shdr,.sitem{grid-template-columns:50px 1fr 90px 100px}
@@ -243,17 +236,6 @@ body::before{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;
           <tr><td>偷偷佈局</td><td>今日/前日淨買超 &gt; 0；但五日總淨買超 &lt; 0；最新三日任一天漲幅 ≤ 5%；五日總漲幅 ≤ 10%</td><td>五日淨買超↑</td></tr>
         </table>
       </div>
-      <div class="guide-sec">
-        <div class="guide-h">⚠️ 選股清單條件說明</div>
-        <table class="guide-table">
-          <tr><th>策略</th><th>連續買超</th><th>N日總漲幅</th><th>每日漲幅</th></tr>
-          <tr><td>策略一</td><td>連續 2 日買超</td><td>2 日總漲幅 &lt; 5%</td><td>每日漲幅 &lt; 5%</td></tr>
-          <tr><td>策略二</td><td>連續 3 日買超</td><td>3 日總漲幅 &lt; 10%</td><td>每日漲幅 &lt; 5%</td></tr>
-          <tr><td>策略三</td><td>連續 4 日買超</td><td>4 日總漲幅 &lt; 15%</td><td>每日漲幅 &lt; 5%</td></tr>
-          <tr><td>策略四</td><td>連續 5 日買超</td><td>5 日總漲幅 &lt; 20%</td><td>每日漲幅 &lt; 5%</td></tr>
-        </table>
-        <p class="guide-p" style="margin-top:8px">漲跌幅以收盤價序列計算（yfinance）；買超以三大法人淨買賣超股數 &gt; 0 判斷。</p>
-      </div>
     </div>
   </div>
 </div>
@@ -287,9 +269,6 @@ body::before{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;
     </div>
   </div>
 </div>
-
-<!-- ⚠️ 免責聲明按鈕 -->
-<button class="disc-btn" onclick="showScreener()">⚠️ 選股清單</button>
 
 <div class="wrap">
 
@@ -344,7 +323,9 @@ body::before{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;
 
   <!-- FOOTER -->
   <div style="margin-top:40px;padding:16px 0;border-top:1px solid var(--ln);text-align:center;font-family:var(--mono);font-size:13px;color:var(--dm)">
-    ⚠️ 本網站所提供之股市資料僅供參考，不構成任何投資建議
+    <span onclick="showScreener()" style="cursor:pointer;user-select:none;transition:color .15s"
+      onmouseover="this.style.color='var(--red)'" onmouseout="this.style.color=''">⚠️</span>
+    本網站所提供之股市資料僅供參考，不構成任何投資建議
   </div>
 
 </div>
