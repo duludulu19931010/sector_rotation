@@ -622,6 +622,27 @@ def compute(
     net_20d  = net_pv[[c for c in last20 if c in net_pv.columns]].sum(axis=1).fillna(0.0)
     log.info(f"net_5d: min={round(float(net_5d.min()),2)}, max={round(float(net_5d.max()),2)}, nonzero={int((net_5d != 0).sum())}")
 
+    # 逐日 net_yi 序列（最近5天，供選股用）
+    net_days = {f"net_d{i+1}": net_pv[d].fillna(0.0) if d in net_pv.columns else pd.Series(0.0, index=net_pv.index)
+                for i, d in enumerate(reversed(last5))}
+
+    # 逐日漲跌序列（最近5天）
+    chg_days_bases = [close_dates[-2], close_dates[-3], close_dates[-4], close_dates[-5], close_dates[-6]] \
+                     if len(close_dates) >= 6 else []
+    chg_days = {}
+    for i, base in enumerate(chg_days_bases):
+        key = f"chg_d{i+1}"
+        if base and base in close_pv.columns:
+            target = close_dates[-(i+1)] if i+1 <= len(close_dates) else close_dates[0]
+            if target in close_pv.columns:
+                b = close_pv[base]; c_ = close_pv[target]
+                v = (c_ - b) / b.where(b > 0.01) * 100
+                chg_days[key] = v.fillna(0.0)
+            else:
+                chg_days[key] = pd.Series(0.0, index=net_pv.index)
+        else:
+            chg_days[key] = pd.Series(0.0, index=net_pv.index)
+
     def safe(v) -> float:
         import math
         f = float(v) if v is not None else 0.0
@@ -634,6 +655,7 @@ def compute(
 
     records: list[dict]             = []
     details: dict[str, list[dict]] = {}
+    all_stocks_map: dict[str, dict] = {}   # code → stock dict（用於去重計算與選股）
 
     for gname, raw_codes in groups.items():
         codes = [c.zfill(4) for c in raw_codes if c.zfill(4) in close_now.index]
@@ -644,7 +666,9 @@ def compute(
             cp2 = safe(chg_p2.get(c,  0)); cp2 = 0.0 if abs(cp2) > 11  else cp2
             c5  = safe(chg_5d.get(c,  0)); c5  = 0.0 if abs(c5)  > 60  else c5
             c20 = safe(chg_20d.get(c, 0)); c20 = 0.0 if abs(c20) > 200 else c20
-            stocks.append({
+            nd  = {k: round(safe(v.get(c, 0)), 4) for k, v in net_days.items()}
+            cd  = {k: round(safe(v.get(c, 0)), 2) for k, v in chg_days.items()}
+            s = {
                 "code":     c,
                 "name":     get_name(c),
                 "close":    round(float(close_now.get(c, 0)), 2),
@@ -657,7 +681,11 @@ def compute(
                 "chg_prev2":round(cp2, 2),
                 "chg_5d":   round(c5,  2),
                 "chg_20d":  round(c20, 2),
-            })
+                **nd, **cd,
+            }
+            stocks.append(s)
+            if c not in all_stocks_map:
+                all_stocks_map[c] = s
         stocks.sort(key=lambda x: x["net_1d"], reverse=True)
         details[gname] = stocks
 
@@ -705,7 +733,7 @@ def compute(
 
     label_counts = {l: sum(1 for r in records if r["label"] == l) for l in ["主力","輪動","退潮","觀望"]}
     log.info(f"Groups: {len(records)} | " + " | ".join(f"{l}={n}" for l, n in label_counts.items()))
-    return records, details
+    return records, details, all_stocks_map
 
 
 # ── 輸出 ──────────────────────────────────────────────────────────────
@@ -723,7 +751,7 @@ def _jdump(fname, data):
         json.dump(_sanitize(data), f, ensure_ascii=False, separators=(",", ":"))
 
 
-def export_json(records, details, trade_date):
+def export_json(records, details, all_stocks, trade_date):
     DATA_DIR.mkdir(parents=True, exist_ok=True)
 
     def attach(lst):
@@ -757,14 +785,16 @@ def export_json(records, details, trade_date):
     _jdump("inflow_low_gain.json",      inflow)
     _jdump("stealth_accumulation.json", stealth)
     _jdump("group_stats.json",          [{k: v for k, v in r.items() if k != "stocks"} for r in records])
+    _jdump("stock_screener.json",       list(all_stocks.values()))
     _jdump("metadata.json", {
-        "last_updated": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        "trade_date":   trade_date,
-        "groups":       len(records),
-        "inflow":       len(inflow),
-        "stealth":      len(stealth),
+        "last_updated":    datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "trade_date":      trade_date,
+        "groups":          len(records),
+        "inflow":          len(inflow),
+        "stealth":         len(stealth),
+        "screener_stocks": len(all_stocks),
     })
-    log.info(f"JSON: bubble={len(bubble)}, inflow={len(inflow)}, stealth={len(stealth)}")
+    log.info(f"JSON: bubble={len(bubble)}, inflow={len(inflow)}, stealth={len(stealth)}, screener={len(all_stocks)}")
 
 
 def export_csv():
@@ -909,8 +939,8 @@ def main():
     )) if not hist.empty else {}
     yf_close = fetch_close_yfinance(codes_market)
 
-    records, details = compute(hist, yf_close, groups, name_map)
-    export_json(records, details, hist["date"].max())
+    records, details, all_stocks = compute(hist, yf_close, groups, name_map)
+    export_json(records, details, all_stocks, hist["date"].max())
     export_csv()
 
     with _db() as c:
