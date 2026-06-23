@@ -279,19 +279,15 @@ body::before{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;
       <div class="chead">
         <div class="ctitle">X＝五日淨買超（億）資金出入量｜Y＝今日淨買超（億）資金加速度｜圓圈大小＝五日量絕對值</div>
         <div class="ctrls">
-          <div class="cbtn on" onclick="filterB('all',this)">全部</div>
-          <div class="cbtn"    onclick="filterB('in',this)">流入</div>
-          <div class="cbtn"    onclick="filterB('out',this)">流出</div>
+          <div class="cbtn on" id="lbtn-主力" onclick="toggleLabel('主力',this)">🔴 主力</div>
+          <div class="cbtn on" id="lbtn-輪動" onclick="toggleLabel('輪動',this)">🟠 輪動</div>
+          <div class="cbtn on" id="lbtn-退潮" onclick="toggleLabel('退潮',this)">🟢 退潮</div>
+          <div class="cbtn on" id="lbtn-觀望" onclick="toggleLabel('觀望',this)">⚫ 觀望</div>
+          <div class="cbtn"    onclick="resetLabels()">全部顯示</div>
           <div class="cbtn"    onclick="resetZoom()">重置縮放</div>
         </div>
       </div>
       <div style="padding:12px 12px 6px">
-        <div class="legend">
-          <div class="li"><div class="ld" style="background:#f03e2a"></div>主力・流入且上漲</div>
-          <div class="li"><div class="ld" style="background:#dd8040"></div>輪動・流入漲幅有限</div>
-          <div class="li"><div class="ld" style="background:#00c070"></div>退潮・資金明顯流出</div>
-          <div class="li"><div class="ld" style="background:#4a6278"></div>觀望・資金沉寂</div>
-        </div>
         <div id="bubbleChart"></div>
         <div class="zoom-hint">滾輪縮放・拖曳平移・點擊泡泡看詳情</div>
       </div>
@@ -439,7 +435,8 @@ function renderBubble(data){
       axisLabel:{...ax.axisLabel,formatter:v=>(v>=0?'+':'')+v.toFixed(2)},
       min:Math.min(...allY)-yp,max:Math.max(...allY)+yp},
     series:Object.entries(grp).map(([nm,pts])=>({
-      name:nm,type:'scatter',data:pts,
+      name:nm,type:'scatter',
+      data:activeLabels.has(nm)?pts:[],
       symbolSize:d=>Math.max(13,Math.min(76,d[2]*2.8+13)),
       itemStyle:{color:BCOL[nm],opacity:.82,borderColor:BCOL[nm],borderWidth:1},
       label:{show:false},
@@ -450,12 +447,56 @@ function renderBubble(data){
   });
 }
 
-function filterB(t,el){
-  document.querySelectorAll('.ctrls .cbtn').forEach(b=>b.classList.remove('on'));
-  el.classList.add('on');
-  const d=t==='in'?ALL.filter(r=>r.net_5d>0):t==='out'?ALL.filter(r=>r.net_5d<0):ALL;
-  renderBubble(d);
+// ── PILLS（去重個股計算合計流入/流出，只計算四位數且千位為1-9的股票）──
+function isRegularStock(code){
+  return typeof code==='string' && code.length===4 && /^[1-9]/.test(code);
 }
+function renderPills(data){
+  const seen=new Set();
+  let si=0,so=0;
+  data.forEach(r=>(r.stocks||[]).forEach(s=>{
+    if(!seen.has(s.code) && isRegularStock(s.code)){
+      seen.add(s.code);
+      if(s.net_5d>0)si+=s.net_5d;
+      else so+=s.net_5d;
+    }
+  }));
+  const inR=data.filter(r=>r.net_5d>0),outR=data.filter(r=>r.net_5d<0);
+  const top=data.reduce((a,b)=>b.net_5d>a.net_5d?b:a,{net_5d:-1e9,g:'—'});
+  const bot=data.reduce((a,b)=>b.net_5d<a.net_5d?b:a,{net_5d:1e9,g:'—'});
+  document.getElementById('pills').innerHTML=[
+    ['族群總數',data.length,'gold'],
+    ['合計流入（去重）',(si>0?'+':'')+si.toFixed(1)+'億','r'],
+    ['合計流出（去重）',Math.abs(so).toFixed(1)+'億','g'],
+    ['最強主力',top.g.slice(0,6),'r'],
+    ['最大退潮',bot.g.slice(0,6),'g'],
+    ['流入族群',inR.length,'r'],
+    ['流出族群',outR.length,'g'],
+  ].map(([l,v,c])=>`<div class="pill"><span class="pl">${l}</span><span class="pv ${c}">${v}</span></div>`).join('');
+}
+
+// ── BUBBLE ──
+const BCOL={'主力':'#f03e2a','輪動':'#dd8040','退潮':'#00c070','觀望':'#4a6278'};
+let activeLabels=new Set(['主力','輪動','退潮','觀望']);
+
+function toggleLabel(label,el){
+  if(activeLabels.has(label)){
+    if(activeLabels.size===1)return; // 至少保留一個
+    activeLabels.delete(label);
+    el.classList.remove('on');
+  }else{
+    activeLabels.add(label);
+    el.classList.add('on');
+  }
+  renderBubble(ALL);
+}
+
+function resetLabels(){
+  activeLabels=new Set(['主力','輪動','退潮','觀望']);
+  ['主力','輪動','退潮','觀望'].forEach(l=>document.getElementById('lbtn-'+l)?.classList.add('on'));
+  renderBubble(ALL);
+}
+
 function resetZoom(){if(chart)chart.dispatchAction({type:'dataZoom',start:0,end:100})}
 
 // ── SIDE PANEL ──
