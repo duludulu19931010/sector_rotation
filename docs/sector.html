@@ -697,29 +697,37 @@ function renderScreener(i){
 
 // ── BOOT ──
 async function boot(){
-  await loadMeta();
-  [ALL,INFLOW,STEALTH,SCREENER]=await Promise.all([
-    load(BASE+'bubble_data.json'),
-    load(BASE+'inflow_low_gain.json'),
-    load(BASE+'stealth_accumulation.json'),
-    load(BASE+'stock_screener.json'),
-  ]);
-  ALL=ALL||[];INFLOW=INFLOW||[];STEALTH=STEALTH||[];SCREENER=SCREENER||[];
-
-  if(ALL.length){
-    try{renderPills(ALL);renderBubble(ALL);}
-    catch(e){
-      console.error('renderBubble error:',e);
+  try{
+    document.getElementById('stamp').textContent='載入 metadata…';
+    await loadMeta();
+    document.getElementById('stamp').textContent='載入泡泡圖資料…';
+    [ALL,INFLOW,STEALTH,SCREENER]=await Promise.all([
+      load(BASE+'bubble_data.json'),
+      load(BASE+'inflow_low_gain.json'),
+      load(BASE+'stealth_accumulation.json'),
+      load(BASE+'stock_screener.json'),
+    ]);
+    ALL=ALL||[];INFLOW=INFLOW||[];STEALTH=STEALTH||[];SCREENER=SCREENER||[];
+    if(ALL.length){
+      try{renderPills(ALL);renderBubble(ALL);}
+      catch(e){
+        console.error('renderBubble error:',e);
+        document.getElementById('bubbleChart').innerHTML=
+          '<div class="empty"><strong>渲染錯誤</strong>'+e.message+'</div>';
+      }
+    }else{
+      console.error('bubble_data.json empty or failed to load');
       document.getElementById('bubbleChart').innerHTML=
-        '<div class="empty"><strong>渲染錯誤</strong>'+e.message+'</div>';
+        '<div class="empty"><strong>資料載入失敗</strong>請確認 bubble_data.json 已正確推送至 GitHub Pages</div>';
     }
-  }else{
-    console.error('bubble_data.json empty or failed to load');
+    try{renderTable(INFLOW,'inflowEl');}catch(e){console.error(e);}
+    try{renderTable(STEALTH,'stealthEl');}catch(e){console.error(e);}
+  }catch(e){
+    console.error('boot error:',e);
+    document.getElementById('stamp').textContent='載入失敗：'+e.message;
     document.getElementById('bubbleChart').innerHTML=
-      '<div class="empty"><strong>資料載入失敗</strong>請確認 bubble_data.json 已正確推送至 GitHub Pages</div>';
+      '<div class="empty"><strong>載入錯誤</strong>'+e.message+'<br>請按 F12 查看 Console 詳細訊息</div>';
   }
-  try{renderTable(INFLOW,'inflowEl');}catch(e){console.error(e);}
-  try{renderTable(STEALTH,'stealthEl');}catch(e){console.error(e);}
 }
 boot();
 </script>
