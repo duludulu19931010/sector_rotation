@@ -242,30 +242,29 @@ body::before{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;
 
 <!-- 選股清單 Modal -->
 <div class="modal-bg" id="screener-bg" onclick="if(event.target===this)closeScreener()">
-  <div class="modal" style="max-width:960px">
+  <div class="modal" style="max-width:1200px;width:96vw">
     <div class="modal-head">
-      <div class="modal-title">⚠️ 選股清單</div>
+      <div class="modal-title">選股清單</div>
       <div class="modal-close" onclick="closeScreener()">✕</div>
     </div>
     <div class="modal-body">
-      <div class="disc-text">⚠️ 本網站所提供之股市資料僅供參考，不構成任何投資建議。以下個股依法人買超天數與漲幅條件篩選，使用前請自行評估風險。</div>
       <div class="screener-tabs" id="screener-tabs"></div>
       <div class="stab-desc" id="stab-desc"></div>
-      <div class="screener-list">
-        <table class="screener-table">
+      <div class="screener-list" style="max-height:65vh">
+        <table class="screener-table" style="font-size:17px">
           <thead><tr>
-            <th style="text-align:left">代號</th><th style="text-align:left">名稱</th>
-            <th>收盤</th>
-            <th>今日淨買超</th><th>今日漲跌</th>
-            <th>前一日淨買超</th><th>前一日漲跌</th>
-            <th>前二日淨買超</th><th>前二日漲跌</th>
-            <th>前三日淨買超</th><th>前三日漲跌</th>
-            <th>前四日淨買超</th><th>前四日漲跌</th>
+            <th style="text-align:left;font-size:13px">代號</th><th style="text-align:left;font-size:13px">名稱</th>
+            <th style="font-size:13px">收盤</th>
+            <th style="font-size:13px">今日淨買超</th><th style="font-size:13px">今日漲跌</th>
+            <th style="font-size:13px">前一日淨買超</th><th style="font-size:13px">前一日漲跌</th>
+            <th style="font-size:13px">前二日淨買超</th><th style="font-size:13px">前二日漲跌</th>
+            <th style="font-size:13px">前三日淨買超</th><th style="font-size:13px">前三日漲跌</th>
+            <th style="font-size:13px">前四日淨買超</th><th style="font-size:13px">前四日漲跌</th>
           </tr></thead>
           <tbody id="screener-body"></tbody>
         </table>
       </div>
-      <div style="font-family:var(--mono);font-size:13px;color:var(--dm);margin-top:10px;text-align:right" id="screener-count"></div>
+      <div style="font-family:var(--mono);font-size:14px;color:var(--dm);margin-top:10px;text-align:right" id="screener-count"></div>
     </div>
   </div>
 </div>
@@ -564,21 +563,48 @@ function closeGuide(){document.getElementById('guide-bg').classList.remove('on')
 
 // ── 選股清單 ──
 const SCREENER_DEFS=[
-  {label:'策略一',desc:'連續 2 日買超｜2 日總漲幅 < 5%｜每日漲幅 < 5%',days:2,totalChg:5,dailyChg:5},
-  {label:'策略二',desc:'連續 3 日買超｜3 日總漲幅 < 10%｜每日漲幅 < 5%',days:3,totalChg:10,dailyChg:5},
-  {label:'策略三',desc:'連續 4 日買超｜4 日總漲幅 < 15%｜每日漲幅 < 5%',days:4,totalChg:15,dailyChg:5},
-  {label:'策略四',desc:'連續 5 日買超｜5 日總漲幅 < 20%｜每日漲幅 < 5%',days:5,totalChg:20,dailyChg:5},
+  {label:'二日',desc:'連續 2 日買超｜2 日總漲幅 < 5%｜每日漲幅 < 5%',  days:2,totalChg:5, dailyChg:5},
+  {label:'三日',desc:'連續 3 日買超｜3 日總漲幅 < 10%｜每日漲幅 < 5%', days:3,totalChg:10,dailyChg:5},
+  {label:'四日',desc:'連續 4 日買超｜4 日總漲幅 < 15%｜每日漲幅 < 5%', days:4,totalChg:15,dailyChg:5},
+  {label:'五日',desc:'連續 5 日買超｜5 日總漲幅 < 20%｜每日漲幅 < 5%', days:5,totalChg:20,dailyChg:5},
 ];
 let curStrategy=0;
 
+// 預先計算每支個股能符合的最高天數（去重：只歸入最高天數的清單）
+function buildBuckets(stocks){
+  const nets=['net_d1','net_d2','net_d3','net_d4','net_d5'];
+  const chgs=['chg_d1','chg_d2','chg_d3','chg_d4','chg_d5'];
+  const defs=SCREENER_DEFS;
+  // buckets[0..3] 對應 二日/三日/四日/五日
+  const buckets=[[], [], [], []];
+
+  stocks.forEach(s=>{
+    let maxDays=0;
+    defs.forEach((def,i)=>{
+      const n=def.days;
+      let ok=true;
+      for(let d=0;d<n;d++){
+        if((s[nets[d]]||0)<=0){ok=false;break;}
+        if(Math.abs(s[chgs[d]]||0)>=def.dailyChg){ok=false;break;}
+      }
+      // 以 net_5d 近似 N 日漲幅加總（chg_5d 為5日總漲幅，N日用 chg_5d 代替）
+      const totalChg=Math.abs(s['chg_5d']||0);
+      if(ok && totalChg<def.totalChg) maxDays=i+2; // 最高符合天數
+    });
+    if(maxDays>=2) buckets[maxDays-2].push(s);
+  });
+  return buckets;
+}
+
+let BUCKETS=[];
+
 function showScreener(){
-  if(!SCREENER.length){
-    alert('選股資料尚未載入，請稍後再試');return;
-  }
+  if(!SCREENER.length){alert('選股資料尚未載入，請稍後再試');return;}
+  BUCKETS=buildBuckets(SCREENER);
   document.getElementById('screener-bg').classList.add('on');
   const tabs=document.getElementById('screener-tabs');
   tabs.innerHTML=SCREENER_DEFS.map((d,i)=>
-    `<div class="stab${i===curStrategy?' on':''}" onclick="switchStrategy(${i})">${d.label}</div>`
+    `<div class="stab${i===curStrategy?' on':''}" onclick="switchStrategy(${i})">${d.label}（${BUCKETS[i].length}）</div>`
   ).join('');
   renderScreener(curStrategy);
 }
@@ -593,19 +619,8 @@ function switchStrategy(i){
 function renderScreener(i){
   const def=SCREENER_DEFS[i];
   document.getElementById('stab-desc').textContent=def.desc;
-  const nets=['net_d1','net_d2','net_d3','net_d4','net_d5'];
-  const chgs=['chg_d1','chg_d2','chg_d3','chg_d4','chg_d5'];
   const n=def.days;
-
-  const results=SCREENER.filter(s=>{
-    for(let d=0;d<n;d++){
-      if((s[nets[d]]||0)<=0)return false;
-      if(Math.abs(s[chgs[d]]||0)>=def.dailyChg)return false;
-    }
-    const totalChg=(s['chg_5d']||0);
-    if(Math.abs(totalChg)>=def.totalChg)return false;
-    return true;
-  }).sort((a,b)=>(b.net_d1||0)-(a.net_d1||0));
+  const results=[...BUCKETS[i]].sort((a,b)=>(b.net_d1||0)-(a.net_d1||0));
 
   const body=document.getElementById('screener-body');
   if(!results.length){
@@ -613,9 +628,9 @@ function renderScreener(i){
   }else{
     body.innerHTML=results.map(s=>`
       <tr>
-        <td style="color:var(--dm)">${s.code}</td>
-        <td style="color:var(--hi)">${s.name||s.code}</td>
-        <td class="${cls(s.close)}" style="text-align:right">${s.close||'—'}</td>
+        <td style="color:var(--dm);font-size:16px">${s.code}</td>
+        <td style="color:var(--hi);font-size:18px">${s.name||s.code}</td>
+        <td class="n" style="text-align:right">${s.close||'—'}</td>
         <td class="${cls(s.net_d1)}" style="text-align:right">${fYi(s.net_d1||0)}</td>
         <td class="${cls(s.chg_d1)}" style="text-align:right">${fPct(s.chg_d1||0)}</td>
         <td class="${cls(s.net_d2)}" style="text-align:right">${fYi(s.net_d2||0)}</td>
