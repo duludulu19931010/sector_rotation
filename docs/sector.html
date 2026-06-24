@@ -364,7 +364,7 @@ document.querySelectorAll('.tab').forEach(t=>t.onclick=()=>{
 // ── META ──
 async function loadMeta(){
   const m=await load(BASE+'metadata.json');
-  document.getElementById('stamp').textContent=m?.last_updated??'尚未更新';
+  return m?.last_updated ?? '尚未更新';
 }
 
 function renderBubble(data){
@@ -673,7 +673,7 @@ async function boot(){
   console.log('%c[TW$FLOW] sector.html VERSION 2026-06-23-FINAL','color:#e8b840;font-size:14px;font-weight:bold');
   try{
     document.getElementById('stamp').textContent='載入 metadata…';
-    await loadMeta();
+    const updatedAt=await loadMeta();
     document.getElementById('stamp').textContent='載入泡泡圖資料…';
     // Promise.allSettled 確保任一失敗不影響其他
     const [r0,r1,r2,r3]=await Promise.allSettled([
@@ -698,6 +698,8 @@ async function boot(){
     }
     try{renderTable(INFLOW,'inflowEl');}catch(e){console.error(e);}
     try{renderTable(STEALTH,'stealthEl');}catch(e){console.error(e);}
+    // 全部載入完成後，顯示資料最後更新時間
+    document.getElementById('stamp').textContent=updatedAt;
   }catch(e){
     console.error('boot error:',e);
     document.getElementById('stamp').textContent='載入失敗：'+e.message;
