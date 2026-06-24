@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>TW$FLOW · 族群資金儀表板</title>
+<!-- VERSION: 2026-06-23-FINAL -->
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
@@ -697,16 +698,19 @@ function renderScreener(i){
 
 // ── BOOT ──
 async function boot(){
+  console.log('%c[TW$FLOW] sector.html VERSION 2026-06-23-FINAL','color:#e8b840;font-size:14px;font-weight:bold');
   try{
     document.getElementById('stamp').textContent='載入 metadata…';
     await loadMeta();
     document.getElementById('stamp').textContent='載入泡泡圖資料…';
-    [ALL,INFLOW,STEALTH,SCREENER]=await Promise.all([
+    // Promise.allSettled 確保任一失敗不影響其他
+    const [r0,r1,r2,r3]=await Promise.allSettled([
       load(BASE+'bubble_data.json'),
       load(BASE+'inflow_low_gain.json'),
       load(BASE+'stealth_accumulation.json'),
       load(BASE+'stock_screener.json'),
     ]);
+    ALL=r0.value; INFLOW=r1.value; STEALTH=r2.value; SCREENER=r3.value;
     ALL=ALL||[];INFLOW=INFLOW||[];STEALTH=STEALTH||[];SCREENER=SCREENER||[];
     if(ALL.length){
       try{renderPills(ALL);renderBubble(ALL);}
