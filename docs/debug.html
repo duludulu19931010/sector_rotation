@@ -3,108 +3,145 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>TW$FLOW Debug</title>
+<title>TW$FLOW Debug 2</title>
+<script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
 <style>
 body{font-family:monospace;background:#0a0e14;color:#8aa8bf;padding:20px;font-size:15px;line-height:1.7}
-h1{color:#e8b840;font-size:20px}
-.test{margin:10px 0;padding:12px;background:#131a22;border-radius:6px;border-left:3px solid #4a6278}
-.test.ok{border-left-color:#00c070}
-.test.fail{border-left-color:#f03e2a}
-.test.pending{border-left-color:#e8b840}
-.label{color:#cce0f0;font-weight:bold}
-.detail{color:#4a6278;font-size:13px;margin-top:4px;word-break:break-all}
-.ok .status{color:#00c070}
-.fail .status{color:#f03e2a}
-.pending .status{color:#e8b840}
-pre{background:#07090d;padding:10px;border-radius:4px;overflow-x:auto;font-size:12px;color:#8aa8bf;max-height:200px;overflow-y:auto}
-.summary{margin-top:20px;padding:16px;background:#1a2535;border-radius:8px;font-size:16px}
+h1{color:#e8b840}
+.box{margin:10px 0;padding:14px;background:#131a22;border-radius:6px;border-left:3px solid #4a6278}
+.box.ok{border-left-color:#00c070}
+.box.fail{border-left-color:#f03e2a}
+.label{color:#cce0f0;font-weight:bold;font-size:16px}
+pre{background:#07090d;padding:12px;border-radius:4px;overflow:auto;font-size:13px;color:#f03e2a;max-height:400px;white-space:pre-wrap;word-break:break-all}
+.sample{color:#4a6278;font-size:12px}
+#chart{height:300px;background:#0d1118;border-radius:6px;margin-top:10px}
 </style>
 </head>
 <body>
-<h1>TW$FLOW 載入診斷</h1>
-<div id="env" class="test">
-  <span class="label">環境資訊</span>
-  <div class="detail" id="env-detail"></div>
-</div>
-<div id="tests"></div>
-<div class="summary" id="summary">執行中…</div>
+<h1>TW$FLOW 渲染診斷</h1>
+<div id="log"></div>
+<div id="chart"></div>
 
 <script>
 const BASE='./assets/data/';
-const FILES=['metadata.json','bubble_data.json','inflow_low_gain.json','stealth_accumulation.json','stock_screener.json'];
+const logDiv=document.getElementById('log');
 
-document.getElementById('env-detail').innerHTML=
-  'URL: '+location.href+'<br>'+
-  'BASE 解析為: '+new URL(BASE,location.href).href+'<br>'+
-  'User-Agent: '+navigator.userAgent.slice(0,80);
+function box(label, ok, content){
+  const d=document.createElement('div');
+  d.className='box '+(ok?'ok':'fail');
+  d.innerHTML=`<span class="label">${ok?'✓':'✗'} ${label}</span>`+(content?`<div>${content}</div>`:'');
+  logDiv.appendChild(d);
+  return d;
+}
 
-const testsDiv=document.getElementById('tests');
-let okCount=0, failCount=0;
+const load=async p=>{
+  const r=await fetch(p+'?v='+Date.now());
+  if(!r.ok)throw new Error('HTTP '+r.status);
+  return JSON.parse(await r.text());
+};
 
-async function testFile(fname){
-  const div=document.createElement('div');
-  div.className='test pending';
-  div.innerHTML=`<span class="label">${fname}</span> <span class="status">⏳ 載入中…</span><div class="detail"></div>`;
-  testsDiv.appendChild(div);
-  const detail=div.querySelector('.detail');
-  const status=div.querySelector('.status');
-  const url=BASE+fname+'?v='+Date.now();
+let chart=null;
+const BCOL={'主力':'#f03e2a','輪動':'#dd8040','退潮':'#00c070','觀望':'#4a6278'};
+let activeLabels=new Set(['主力','輪動','退潮','觀望']);
 
-  const t0=performance.now();
+const fN=(v,d=2)=>{const n=parseFloat(v);return isNaN(n)?'—':(n>0?'+':'')+n.toFixed(d)};
+const fYi=v=>fN(v,2)+'億';
+const fPct=v=>fN(v,2)+'%';
+const col=v=>parseFloat(v)>=0?'#f03e2a':'#00c070';
+const cls=v=>parseFloat(v)>0?'r':parseFloat(v)<0?'g':'n';
+
+function isRegularStock(code){
+  return typeof code==='string' && code.length===4 && /^[1-9]/.test(code);
+}
+
+function renderPills(data){
+  const seen=new Set();
+  let si=0,so=0;
+  data.forEach(r=>(r.stocks||[]).forEach(s=>{
+    if(!seen.has(s.code) && isRegularStock(s.code)){
+      seen.add(s.code);
+      if(s.net_5d>0)si+=s.net_5d;
+      else so+=s.net_5d;
+    }
+  }));
+  return {si,so,count:seen.size};
+}
+
+function renderBubble(data){
+  const el=document.getElementById('chart');
+  if(!chart){chart=echarts.init(el);}
+  const grp={'主力':[],'輪動':[],'退潮':[],'觀望':[]};
+  data.forEach(d=>(grp[d.label]||grp['觀望']).push({value:[d.x,d.y,Math.abs(d.net_5d)],name:d.g,_:d}));
+  const allX=data.map(d=>d.x),allY=data.map(d=>d.y);
+  const xp=(Math.max(...allX.map(Math.abs))||1)*.12;
+  const yp=(Math.max(...allY.map(Math.abs))||1)*.2;
+  chart.setOption({
+    backgroundColor:'transparent',
+    xAxis:{min:Math.min(...allX)-xp,max:Math.max(...allX)+xp},
+    yAxis:{min:Math.min(...allY)-yp,max:Math.max(...allY)+yp},
+    series:Object.entries(grp).map(([nm,pts])=>({
+      name:nm,type:'scatter',data:activeLabels.has(nm)?pts:[],
+      symbolSize:d=>Math.max(13,Math.min(76,d[2]*2.8+13)),
+      itemStyle:{color:BCOL[nm],opacity:.82}
+    }))
+  });
+}
+
+async function run(){
+  let ALL, INFLOW, STEALTH, SCREENER;
+
+  // 1. 載入
   try{
-    const r=await fetch(url);
-    const ms=Math.round(performance.now()-t0);
-    detail.innerHTML=`HTTP ${r.status} ${r.statusText} | Content-Type: ${r.headers.get('Content-Type')} | ${ms}ms`;
+    [ALL,INFLOW,STEALTH,SCREENER]=await Promise.all([
+      load(BASE+'bubble_data.json'),
+      load(BASE+'inflow_low_gain.json'),
+      load(BASE+'stealth_accumulation.json'),
+      load(BASE+'stock_screener.json'),
+    ]);
+    box('載入 4 個 JSON', true, `bubble=${ALL.length}, inflow=${INFLOW.length}, stealth=${STEALTH.length}, screener=${SCREENER.length}`);
+  }catch(e){
+    box('載入失敗', false, `<pre>${e.stack||e.message}</pre>`);
+    return;
+  }
 
-    if(!r.ok){
-      div.className='test fail';
-      status.textContent='✗ HTTP '+r.status;
-      failCount++;
-      return;
+  // 2. 檢查 bubble_data 第一筆結構
+  if(ALL.length){
+    const s=ALL[0];
+    box('bubble_data[0] 欄位', true,
+      `<div class="sample">keys: ${Object.keys(s).join(', ')}</div>`+
+      `<div class="sample">g=${s.g}, x=${s.x}, y=${s.y}, net_5d=${s.net_5d}, net_1d=${s.net_1d}, label=${s.label}</div>`+
+      `<div class="sample">stocks 數量: ${(s.stocks||[]).length}</div>`);
+
+    // 檢查是否有 x/y 為 undefined 或非數字
+    const badXY=ALL.filter(d=>typeof d.x!=='number'||typeof d.y!=='number'||isNaN(d.x)||isNaN(d.y));
+    if(badXY.length){
+      box('發現 x/y 異常的族群', false,
+        `<div class="sample">${badXY.length} 筆異常</div>`+
+        `<pre>${JSON.stringify(badXY.slice(0,3).map(d=>({g:d.g,x:d.x,y:d.y})),null,2)}</pre>`);
+    }else{
+      box('x/y 數值檢查', true, '全部為合法數字');
     }
-
-    const text=await r.text();
-    detail.innerHTML+=`<br>檔案大小: ${(text.length/1024).toFixed(1)} KB`;
-    detail.innerHTML+=`<br>開頭: ${text.slice(0,60).replace(/</g,'&lt;')}`;
-
-    try{
-      const data=JSON.parse(text);
-      const ms2=Math.round(performance.now()-t0);
-      div.className='test ok';
-      const count=Array.isArray(data)?data.length:Object.keys(data).length;
-      status.textContent=`✓ OK (${count} 筆, ${ms2}ms)`;
-      okCount++;
-
-      if(fname==='metadata.json'){
-        detail.innerHTML+=`<br><pre>${JSON.stringify(data,null,2)}</pre>`;
-      }
-    }catch(parseErr){
-      div.className='test fail';
-      status.textContent='✗ JSON 解析失敗';
-      detail.innerHTML+=`<br><span style="color:#f03e2a">${parseErr.message}</span>`;
-      detail.innerHTML+=`<br>第100字元附近: ${text.slice(80,160).replace(/</g,'&lt;')}`;
-      failCount++;
-    }
-  }catch(fetchErr){
-    div.className='test fail';
-    status.textContent='✗ Fetch 失敗';
-    detail.innerHTML=`<span style="color:#f03e2a">${fetchErr.message}</span><br>URL: ${url}`;
-    failCount++;
   }
+
+  // 3. 執行 renderPills
+  try{
+    const r=renderPills(ALL);
+    box('renderPills 執行', true, `合計流入=${r.si.toFixed(1)}億, 合計流出=${r.so.toFixed(1)}億, 去重個股=${r.count}`);
+  }catch(e){
+    box('renderPills 失敗', false, `<pre>${e.stack||e.message}</pre>`);
+  }
+
+  // 4. 執行 renderBubble
+  try{
+    renderBubble(ALL);
+    box('renderBubble 執行', true, '泡泡圖渲染成功（見下方）');
+  }catch(e){
+    box('renderBubble 失敗', false, `<pre>${e.stack||e.message}</pre>`);
+  }
+
+  box('診斷完成', true, '如果上面全部綠色，但主頁仍卡住，請確認主頁的 sector.html 是最新版本');
 }
-
-async function runAll(){
-  for(const f of FILES){
-    await testFile(f);
-  }
-  const sum=document.getElementById('summary');
-  if(failCount===0){
-    sum.innerHTML=`<span style="color:#00c070">✓ 全部 ${okCount} 個檔案載入成功</span><br>如果主頁仍卡在「載入中」，問題在 renderBubble 或 renderPills 的資料處理。`;
-  }else{
-    sum.innerHTML=`<span style="color:#f03e2a">✗ ${failCount} 個檔案失敗，${okCount} 個成功</span><br>失敗的檔案就是主頁卡住的原因。`;
-  }
-}
-runAll();
+run().catch(e=>box('未捕捉的錯誤', false, `<pre>${e.stack||e.message}</pre>`));
 </script>
 </body>
 </html>
