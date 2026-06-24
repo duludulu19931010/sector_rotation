@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TW$FLOW Debug</title>
+<style>
+body{font-family:monospace;background:#0a0e14;color:#8aa8bf;padding:20px;font-size:15px;line-height:1.7}
+h1{color:#e8b840;font-size:20px}
+.test{margin:10px 0;padding:12px;background:#131a22;border-radius:6px;border-left:3px solid #4a6278}
+.test.ok{border-left-color:#00c070}
+.test.fail{border-left-color:#f03e2a}
+.test.pending{border-left-color:#e8b840}
+.label{color:#cce0f0;font-weight:bold}
+.detail{color:#4a6278;font-size:13px;margin-top:4px;word-break:break-all}
+.ok .status{color:#00c070}
+.fail .status{color:#f03e2a}
+.pending .status{color:#e8b840}
+pre{background:#07090d;padding:10px;border-radius:4px;overflow-x:auto;font-size:12px;color:#8aa8bf;max-height:200px;overflow-y:auto}
+.summary{margin-top:20px;padding:16px;background:#1a2535;border-radius:8px;font-size:16px}
+</style>
+</head>
+<body>
+<h1>TW$FLOW 載入診斷</h1>
+<div id="env" class="test">
+  <span class="label">環境資訊</span>
+  <div class="detail" id="env-detail"></div>
+</div>
+<div id="tests"></div>
+<div class="summary" id="summary">執行中…</div>
+
+<script>
+const BASE='./assets/data/';
+const FILES=['metadata.json','bubble_data.json','inflow_low_gain.json','stealth_accumulation.json','stock_screener.json'];
+
+document.getElementById('env-detail').innerHTML=
+  'URL: '+location.href+'<br>'+
+  'BASE 解析為: '+new URL(BASE,location.href).href+'<br>'+
+  'User-Agent: '+navigator.userAgent.slice(0,80);
+
+const testsDiv=document.getElementById('tests');
+let okCount=0, failCount=0;
+
+async function testFile(fname){
+  const div=document.createElement('div');
+  div.className='test pending';
+  div.innerHTML=`<span class="label">${fname}</span> <span class="status">⏳ 載入中…</span><div class="detail"></div>`;
+  testsDiv.appendChild(div);
+  const detail=div.querySelector('.detail');
+  const status=div.querySelector('.status');
+  const url=BASE+fname+'?v='+Date.now();
+
+  const t0=performance.now();
+  try{
+    const r=await fetch(url);
+    const ms=Math.round(performance.now()-t0);
+    detail.innerHTML=`HTTP ${r.status} ${r.statusText} | Content-Type: ${r.headers.get('Content-Type')} | ${ms}ms`;
+
+    if(!r.ok){
+      div.className='test fail';
+      status.textContent='✗ HTTP '+r.status;
+      failCount++;
+      return;
+    }
+
+    const text=await r.text();
+    detail.innerHTML+=`<br>檔案大小: ${(text.length/1024).toFixed(1)} KB`;
+    detail.innerHTML+=`<br>開頭: ${text.slice(0,60).replace(/</g,'&lt;')}`;
+
+    try{
+      const data=JSON.parse(text);
+      const ms2=Math.round(performance.now()-t0);
+      div.className='test ok';
+      const count=Array.isArray(data)?data.length:Object.keys(data).length;
+      status.textContent=`✓ OK (${count} 筆, ${ms2}ms)`;
+      okCount++;
+
+      if(fname==='metadata.json'){
+        detail.innerHTML+=`<br><pre>${JSON.stringify(data,null,2)}</pre>`;
+      }
+    }catch(parseErr){
+      div.className='test fail';
+      status.textContent='✗ JSON 解析失敗';
+      detail.innerHTML+=`<br><span style="color:#f03e2a">${parseErr.message}</span>`;
+      detail.innerHTML+=`<br>第100字元附近: ${text.slice(80,160).replace(/</g,'&lt;')}`;
+      failCount++;
+    }
+  }catch(fetchErr){
+    div.className='test fail';
+    status.textContent='✗ Fetch 失敗';
+    detail.innerHTML=`<span style="color:#f03e2a">${fetchErr.message}</span><br>URL: ${url}`;
+    failCount++;
+  }
+}
+
+async function runAll(){
+  for(const f of FILES){
+    await testFile(f);
+  }
+  const sum=document.getElementById('summary');
+  if(failCount===0){
+    sum.innerHTML=`<span style="color:#00c070">✓ 全部 ${okCount} 個檔案載入成功</span><br>如果主頁仍卡在「載入中」，問題在 renderBubble 或 renderPills 的資料處理。`;
+  }else{
+    sum.innerHTML=`<span style="color:#f03e2a">✗ ${failCount} 個檔案失敗，${okCount} 個成功</span><br>失敗的檔案就是主頁卡住的原因。`;
+  }
+}
+runAll();
+</script>
+</body>
+</html>
