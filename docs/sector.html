@@ -367,34 +367,6 @@ async function loadMeta(){
   document.getElementById('stamp').textContent=m?.last_updated??'尚未更新';
 }
 
-// ── PILLS（去重個股計算合計流入/流出）──
-function renderPills(data){
-  const seen=new Set();
-  let si=0,so=0;
-  data.forEach(r=>(r.stocks||[]).forEach(s=>{
-    if(!seen.has(s.code)){
-      seen.add(s.code);
-      if(s.net_5d>0)si+=s.net_5d;
-      else so+=s.net_5d;
-    }
-  }));
-  const inR=data.filter(r=>r.net_5d>0),outR=data.filter(r=>r.net_5d<0);
-  const top=data.reduce((a,b)=>b.net_5d>a.net_5d?b:a,{net_5d:-1e9,g:'—'});
-  const bot=data.reduce((a,b)=>b.net_5d<a.net_5d?b:a,{net_5d:1e9,g:'—'});
-  document.getElementById('pills').innerHTML=[
-    ['族群總數',data.length,'gold'],
-    ['合計流入（去重）',(si>0?'+':'')+si.toFixed(1)+'億','r'],
-    ['合計流出（去重）',Math.abs(so).toFixed(1)+'億','g'],
-    ['最強主力',top.g.slice(0,6),'r'],
-    ['最大退潮',bot.g.slice(0,6),'g'],
-    ['流入族群',inR.length,'r'],
-    ['流出族群',outR.length,'g'],
-  ].map(([l,v,c])=>`<div class="pill"><span class="pl">${l}</span><span class="pv ${c}">${v}</span></div>`).join('');
-}
-
-// ── BUBBLE ──
-const BCOL={'主力':'#f03e2a','輪動':'#dd8040','退潮':'#00c070','觀望':'#4a6278'};
-
 function renderBubble(data){
   const el=document.getElementById('bubbleChart');
   if(!chart){
