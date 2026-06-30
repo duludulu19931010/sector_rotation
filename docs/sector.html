@@ -192,13 +192,15 @@ body::before{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;
       <div class="guide-sec">
         <div class="guide-h">資料來源</div>
         <table class="guide-table">
-          <tr><th>資料項目</th><th>來源</th><th>更新時間</th></tr>
-          <tr><td>TWSE 收盤價序列</td><td>yfinance (Yahoo Finance)</td><td>盤後約 20 分鐘</td></tr>
-          <tr><td>TWSE 成交股數 / 成交金額</td><td>TWSE OpenAPI STOCK_DAY_ALL</td><td>前一個交易日（T-1）</td></tr>
-          <tr><td>TWSE 三大法人買賣超</td><td>TWSE T86</td><td>當日盤後揭露</td></tr>
-          <tr><td>TPEx 收盤 / 成交 / 三大法人</td><td>TPEx OpenAPI</td><td>當日盤後揭露</td></tr>
-          <tr><td>TPEx 歷史行情 / 三大法人</td><td>手動 CSV（input/TPEx、input/TPExDealer）</td><td>一次性補充</td></tr>
+          <tr><th>資料項目</th><th>來源</th><th>日期支援</th></tr>
+          <tr><td>收盤價序列（漲跌幅用）</td><td>yfinance (Yahoo Finance)</td><td>完整歷史</td></tr>
+          <tr><td>TWSE 今日成交股數 / 金額</td><td>TWSE OpenAPI STOCK_DAY_ALL</td><td>僅最新交易日</td></tr>
+          <tr><td>TWSE 歷史成交股數 / 金額</td><td>TWSE STOCK_DAY（個股逐月）</td><td>支援歷史</td></tr>
+          <tr><td>TWSE 三大法人買賣超</td><td>TWSE T86</td><td>支援歷史</td></tr>
+          <tr><td>TPEx 收盤 / 成交</td><td>TPEx dailyQuotes（新版 www API）</td><td>支援歷史</td></tr>
+          <tr><td>TPEx 三大法人買賣超</td><td>TPEx dailyTrade（新版 www API）</td><td>支援歷史</td></tr>
         </table>
+        <p class="guide-p" style="margin-top:8px;font-size:14px;color:var(--dm)">所有資料皆由官方 API 自動抓取，無需手動 CSV。</p>
       </div>
       <div class="guide-sec">
         <div class="guide-h">數字計算方式</div>
