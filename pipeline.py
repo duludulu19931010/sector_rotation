@@ -21,8 +21,6 @@ ROOT             = Path(__file__).resolve().parent
 DB_FILE          = ROOT / "db" / "market.db"
 DATA_DIR         = ROOT / "docs" / "assets" / "data"
 INPUT_DIR        = ROOT / "input"
-TPEX_DIR         = INPUT_DIR / "TPEx"
-TPEX_DEALER_DIR  = INPUT_DIR / "TPExDealer"
 GROUP_CSV        = INPUT_DIR / "group.csv"
 LOG_FILE         = ROOT / "pipeline.log"
 
@@ -280,51 +278,111 @@ def fetch_twse_history(dates: list[str]) -> pd.DataFrame:
 
 
 # ── TPEx API ──────────────────────────────────────────────────────────
-def fetch_tpex_today() -> tuple[str, dict]:
-    """tpex_mainboard_quotes → (trade_date, {code: {name,close,volume,value}})"""
+def fetch_tpex_quotes(date_str: str = None) -> tuple[str, dict]:
+    """
+    TPEx 新版行情 API（支援歷史日期）
+    date_str: 'YYYY/MM/DD'（民國年自動轉換），None=今日
+    回傳 (trade_date, {code: {name,close,volume,value}})
+    欄位順序：[代號,名稱,收盤,漲跌,開盤,最高,最低,均價,成交股數,成交金額,...]
+    """
+    d = date_str or date.today().strftime("%Y/%m/%d")
     data = _get(
-        "https://www.tpex.org.tw/openapi/v1/tpex_mainboard_quotes",
+        "https://www.tpex.org.tw/www/zh-tw/afterTrading/dailyQuotes",
+        params={"date": d, "id": "", "response": "json"},
         headers=TPEX_HEADERS, verify=False,
     )
-    if not isinstance(data, list) or len(data) < 5:
-        raise RuntimeError(f"TPEx quotes failed: {len(data) if data else 0} rows")
-    trade_date = _parse_roc_date(data[0].get("Date", "")) if data else TODAY
+    if not isinstance(data, dict) or "tables" not in data:
+        raise RuntimeError(f"TPEx quotes failed for {d}")
+    tables = data.get("tables", [])
+    if not tables or not tables[0].get("data"):
+        log.warning(f"TPEx quotes empty for {d}")
+        return "", {}
+    table = tables[0]
+    # date 欄位：外層 "20260612" 或 table 內 "115/06/12"
+    raw_date = data.get("date", "")
+    trade_date = f"{raw_date[:4]}-{raw_date[4:6]}-{raw_date[6:8]}" if len(raw_date) == 8 else TODAY
+
     result = {}
-    for item in data:
-        code  = str(item.get("SecuritiesCompanyCode", "")).strip().zfill(4)
-        close = _flt(item.get("Close", 0))
+    for row in table["data"]:
+        if len(row) < 10:
+            continue
+        code  = str(row[0]).strip().zfill(4)
+        close = _flt(row[2])
         if not code.strip("0") or close <= 0:
             continue
         result[code] = {
-            "name":   item.get("CompanyName", ""),
+            "name":   str(row[1]).strip(),
             "close":  close,
-            "volume": _int(item.get("TradingShares",     0)),
-            "value":  _int(item.get("TransactionAmount", 0)),
+            "volume": _int(row[8]),
+            "value":  _int(row[9]),
         }
-    log.info(f"TPEx today: {len(result)} stocks, date={trade_date}")
+    log.info(f"TPEx quotes {trade_date}: {len(result)} stocks")
     return trade_date, result
 
 
-def fetch_tpex_inst() -> dict[str, int]:
-    """tpex_3insti → {code: inst_net_shares}"""
+def fetch_tpex_inst(date_str: str = None) -> dict[str, int]:
+    """
+    TPEx 新版三大法人 API（支援歷史日期）
+    date_str: 'YYYY/MM/DD'，None=今日
+    回傳 {code: inst_net_shares}
+    欄位：最後一欄(index 24)為「三大法人買賣超股數合計」
+    """
+    d = date_str or date.today().strftime("%Y/%m/%d")
     data = _get(
-        "https://www.tpex.org.tw/openapi/v1/tpex_3insti_daily_trading",
+        "https://www.tpex.org.tw/www/zh-tw/insti/dailyTrade",
+        params={"type": "Daily", "sect": "AL", "date": d, "id": "", "response": "json"},
         headers=TPEX_HEADERS, verify=False,
     )
-    if not isinstance(data, list) or len(data) < 5:
-        raise RuntimeError(f"TPEx 3insti failed: {len(data) if data else 0} rows")
+    if not isinstance(data, dict) or "tables" not in data:
+        raise RuntimeError(f"TPEx inst failed for {d}")
+    tables = data.get("tables", [])
+    if not tables or not tables[0].get("data"):
+        log.warning(f"TPEx inst empty for {d}")
+        return {}
+    rows = tables[0]["data"]
     result = {}
-    for item in data:
-        code = str(item.get("SecuritiesCompanyCode", "")).strip().zfill(4)
+    for row in rows:
+        if len(row) < 3:
+            continue
+        code = str(row[0]).strip().zfill(4)
         if not code.strip("0"):
             continue
-        b = lambda k: _int(item.get(k, 0))
-        total = (b("ForeignInvestorsBuy") - b("ForeignInvestorsSell")
-               + b("InvestmentTrustBuy")  - b("InvestmentTrustSell")
-               + b("DealersBuy")          - b("DealersSell"))
-        result[code] = total or _int(item.get("TotalNetBuySell", item.get("NetBuySell", 0)))
-    log.info(f"TPEx 3insti: {len(result)} stocks")
+        result[code] = _int(row[-1])   # 最後一欄=三大法人買賣超股數合計
+    log.info(f"TPEx inst: {len(result)} stocks")
     return result
+
+
+def fetch_tpex_history(dates: list[str]) -> pd.DataFrame:
+    """
+    逐日補抓 TPEx 歷史（行情 + 三大法人），用新版 www API
+    dates: ['2026-06-12', ...]
+    """
+    if not dates:
+        return pd.DataFrame()
+    log.info(f"TPEx history backfill: {len(dates)} dates")
+    rows = []
+    for i, dd in enumerate(sorted(dates)):
+        d_slash = dd.replace("-", "/")
+        _, price = fetch_tpex_quotes(d_slash)
+        inst     = fetch_tpex_inst(d_slash)
+        if not price:
+            time.sleep(0.8)
+            continue
+        for code, p in price.items():
+            avg  = p["value"] / p["volume"] if p["volume"] else 0.0
+            net  = inst.get(code, 0)
+            ival = round(net * avg / 1e8, 6)
+            rows.append({
+                "date": dd, "code": code, "market": "TPEx", "name": p["name"],
+                "close_price": p["close"], "trade_volume": p["volume"],
+                "trade_value": p["value"], "avg_price": round(avg, 2),
+                "inst_net": net, "inst_value": ival, "net_yi": ival,
+            })
+        if i < len(dates) - 1:
+            time.sleep(0.5)
+    df = pd.DataFrame(rows)
+    log.info(f"TPEx history: {len(df)} rows, {df['date'].nunique() if not df.empty else 0} dates")
+    return df
 
 
 # ── 今日抓取 ──────────────────────────────────────────────────────────
@@ -335,7 +393,7 @@ def fetch_today() -> pd.DataFrame:
     """
     with ThreadPoolExecutor(max_workers=3) as pool:
         f_tw = pool.submit(fetch_twse_today)
-        f_tp = pool.submit(fetch_tpex_today)
+        f_tp = pool.submit(fetch_tpex_quotes)
         f_ti = pool.submit(fetch_tpex_inst)
         twse_date, r_tw = f_tw.result()
         tpex_date, r_tp = f_tp.result()
@@ -447,82 +505,6 @@ def fetch_close_yfinance(codes_market: dict[str, str], days: int = 35) -> pd.Dat
         log.info(f"yfinance: {len(df)} records, {df['date'].nunique()} dates, "
                  f"{df['code'].nunique()} codes, range={df['date'].min()} ~ {df['date'].max()}")
     return df
-
-
-# ── CSV 載入 ──────────────────────────────────────────────────────────
-def load_tpex_csv() -> pd.DataFrame:
-    """input/TPEx/TPEx_YYYYMMDD.csv → DataFrame（big5，前2行標題跳過）"""
-    if not TPEX_DIR.exists():
-        return pd.DataFrame()
-    frames = []
-    for f in sorted(TPEX_DIR.glob("TPEx_*.csv")):
-        stem = f.stem.replace("TPEx_", "")
-        if not (len(stem) == 8 and stem.isdigit()):
-            continue
-        dd = f"{stem[:4]}-{stem[4:6]}-{stem[6:8]}"
-        try:
-            text  = f.read_bytes().decode("big5", errors="replace")
-            lines = text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
-            df    = pd.read_csv(StringIO("\n".join(lines[2:])))
-            if not {"代號", "收盤", "成交股數", "成交金額(元)"}.issubset(df.columns):
-                continue
-            df["代號"] = df["代號"].astype(str).str.strip().str.zfill(4)
-            df["close_price"]  = pd.to_numeric(df["收盤"].astype(str).str.replace(",", ""), errors="coerce")
-            df["trade_volume"] = pd.to_numeric(df["成交股數"].astype(str).str.replace(",", ""), errors="coerce").fillna(0).astype(int)
-            df["trade_value"]  = pd.to_numeric(df["成交金額(元)"].astype(str).str.replace(",", ""), errors="coerce").fillna(0).astype(int)
-            df["avg_price"]    = df.apply(lambda r: round(r["trade_value"] / r["trade_volume"], 2) if r["trade_volume"] else 0.0, axis=1)
-            sub = df[["代號"]].copy()
-            sub.columns = ["code"]
-            sub["date"]         = dd
-            sub["market"]       = "TPEx"
-            sub["name"]         = df["名稱"].astype(str).str.strip() if "名稱" in df.columns else ""
-            sub["close_price"]  = df["close_price"]
-            sub["trade_volume"] = df["trade_volume"]
-            sub["trade_value"]  = df["trade_value"]
-            sub["avg_price"]    = df["avg_price"]
-            sub["inst_net"]     = 0
-            sub["inst_value"]   = 0.0
-            sub["net_yi"]       = 0.0
-            sub = sub.dropna(subset=["close_price"])
-            sub = sub[sub["code"].str.match(r"^\d{4,6}$")]
-            frames.append(sub)
-            log.info(f"TPEx CSV {f.name}: {len(sub)} rows for {dd}")
-        except Exception as e:
-            log.warning(f"TPEx CSV {f.name}: {e}")
-    return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
-
-
-def load_tpex_dealer_csv() -> dict[str, dict[str, int]]:
-    """input/TPExDealer/TPExDealer_YYYYMMDD.csv → {date: {code: inst_net}}"""
-    if not TPEX_DEALER_DIR.exists():
-        return {}
-    result = {}
-    for f in sorted(TPEX_DEALER_DIR.glob("TPExDealer_*.csv")):
-        stem = f.stem.replace("TPExDealer_", "")
-        if not (len(stem) == 8 and stem.isdigit()):
-            continue
-        dd = f"{stem[:4]}-{stem[4:6]}-{stem[6:8]}"
-        try:
-            text  = f.read_bytes().decode("cp950", errors="replace")
-            lines = text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
-            df    = pd.read_csv(StringIO("\n".join(lines[1:])))
-            col   = "三大法人買賣超股數合計"
-            if col not in df.columns or "代號" not in df.columns:
-                continue
-            day_map = {}
-            for _, row in df.iterrows():
-                code = str(row["代號"]).strip().zfill(4)
-                if not code.strip("0"):
-                    continue
-                try:
-                    day_map[code] = int(float(str(row[col]).replace(",", "")))
-                except (ValueError, TypeError):
-                    pass
-            result[dd] = day_map
-            log.info(f"TPExDealer {f.name}: {len(day_map)} stocks for {dd}")
-        except Exception as e:
-            log.warning(f"TPExDealer {f.name}: {e}")
-    return result
 
 
 # ── 族群清單 ──────────────────────────────────────────────────────────
@@ -864,69 +846,41 @@ def main():
             else:
                 db_save(mdf)
 
-        # ── TWSE 歷史補抓 ──────────────────────────────────────────────
+        # ── TWSE + TPEx 歷史補抓（用 yfinance 交易日曆找缺漏）──────────────
         with _db() as c:
             twse_done = {r[0] for r in c.execute(
                 "SELECT DISTINCT date FROM daily WHERE market='TWSE'"
             ).fetchall()}
+            tpex_done = {r[0] for r in c.execute(
+                "SELECT DISTINCT date FROM daily WHERE market='TPEx'"
+            ).fetchall()}
 
-        if len(twse_done) < 21 or args.reset_history:
+        need_backfill = (len(twse_done) < 21 or len(tpex_done) < 21 or args.reset_history)
+        if need_backfill:
             try:
                 import yfinance as yf
-                cal = yf.download("2330.TW", period="30d", auto_adjust=True, progress=False)
+                cal = yf.download("2330.TW", period="35d", auto_adjust=True, progress=False)
                 yf_dates = {str(d)[:10] for d in cal.index} if not cal.empty else set()
             except Exception as e:
                 log.warning(f"yfinance calendar: {e}")
                 yf_dates = set()
 
-            missing = sorted(yf_dates - twse_done)
-            if missing:
-                log.info(f"TWSE missing {len(missing)} dates: {missing}")
-                hdf = fetch_twse_history(missing)
+            # 只補最近 25 個交易日
+            recent = sorted(yf_dates)[-25:] if len(yf_dates) > 25 else sorted(yf_dates)
+
+            twse_missing = sorted(set(recent) - twse_done)
+            if twse_missing:
+                log.info(f"TWSE missing {len(twse_missing)} dates: {twse_missing}")
+                hdf = fetch_twse_history(twse_missing)
                 if not hdf.empty:
                     db_save(hdf)
 
-        # ── TPEx CSV 歷史 ───────────────────────────────────────────────
-        tpex_csv = load_tpex_csv()
-        if not tpex_csv.empty:
-            with _db() as c:
-                tpex_done = {r[0] for r in c.execute(
-                    "SELECT DISTINCT date FROM daily WHERE market='TPEx'"
-                ).fetchall()}
-            new_rows = tpex_csv[~tpex_csv["date"].isin(tpex_done)]
-            if not new_rows.empty:
-                db_save(new_rows)
-
-        # ── TPExDealer CSV ──────────────────────────────────────────────
-        dealer = load_tpex_dealer_csv()
-        if dealer:
-            ins = upd = 0
-            with _db() as c:
-                for dd, imap in dealer.items():
-                    for code, inst in imap.items():
-                        if not inst:
-                            continue
-                        row = c.execute(
-                            "SELECT trade_volume, trade_value FROM daily WHERE date=? AND code=? AND market='TPEx'",
-                            (dd, code)
-                        ).fetchone()
-                        if row:
-                            vol, val = row[0], row[1]
-                            avg  = val / vol if vol else 0.0
-                            ival = round(inst * avg / 1e8, 6)
-                            c.execute(
-                                "UPDATE daily SET inst_net=?,inst_value=?,net_yi=? WHERE date=? AND code=? AND market='TPEx'",
-                                (inst, ival, ival, dd, code)
-                            )
-                            upd += 1
-                        else:
-                            c.execute("""
-                                INSERT OR IGNORE INTO daily
-                                (date,code,market,name,close_price,trade_volume,trade_value,avg_price,inst_net,inst_value,net_yi)
-                                VALUES (?,?,?,?,0,0,0,0,?,?,?)
-                            """, (dd, code, "TPEx", name_map.get(code, ""), inst, 0.0, 0.0))
-                            ins += 1
-            log.info(f"TPExDealer: updated={upd}, inserted={ins}")
+            tpex_missing = sorted(set(recent) - tpex_done)
+            if tpex_missing:
+                log.info(f"TPEx missing {len(tpex_missing)} dates: {tpex_missing}")
+                tdf = fetch_tpex_history(tpex_missing)
+                if not tdf.empty:
+                    db_save(tdf)
 
     hist = db_load(days=25)
     if hist.empty:
