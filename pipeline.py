@@ -5,9 +5,9 @@ import sqlite3
 import sys
 import time
 import urllib3
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextlib import contextmanager
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from io import StringIO
 from pathlib import Path
 
@@ -17,12 +17,12 @@ import requests
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # ── 路徑 ──────────────────────────────────────────────────────────────
-ROOT             = Path(__file__).resolve().parent
-DB_FILE          = ROOT / "db" / "market.db"
-DATA_DIR         = ROOT / "docs" / "assets" / "data"
-INPUT_DIR        = ROOT / "input"
-GROUP_CSV        = INPUT_DIR / "group.csv"
-LOG_FILE         = ROOT / "pipeline.log"
+ROOT      = Path(__file__).resolve().parent
+DB_FILE   = ROOT / "db" / "market.db"
+DATA_DIR  = ROOT / "docs" / "assets" / "data"
+INPUT_DIR = ROOT / "input"
+GROUP_CSV = INPUT_DIR / "group.csv"
+LOG_FILE  = ROOT / "pipeline.log"
 
 TODAY   = date.today().strftime("%Y-%m-%d")
 TODAY_8 = date.today().strftime("%Y%m%d")
@@ -35,10 +35,8 @@ TPEX_HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
-    handlers=[
-        logging.StreamHandler(sys.stdout),
-        logging.FileHandler(str(LOG_FILE), encoding="utf-8"),
-    ],
+    handlers=[logging.StreamHandler(sys.stdout),
+              logging.FileHandler(str(LOG_FILE), encoding="utf-8")],
 )
 log = logging.getLogger("twflow")
 
@@ -127,22 +125,19 @@ def db_save(df: pd.DataFrame) -> int:
         return 0
     rows = []
     for _, r in df.iterrows():
-        vol  = int(float(str(r.get("trade_volume", 0)).replace(",", "") or 0))
-        val  = int(float(str(r.get("trade_value",  0)).replace(",", "") or 0))
-        inst = int(float(str(r.get("inst_net",     0)).replace(",", "") or 0))
-        avg  = _flt(r.get("avg_price"))   or (val / vol if vol else 0.0)
-        ival = _flt(r.get("inst_value"))  or round(inst * avg / 1e8, 6)
+        vol  = _int(r.get("trade_volume", 0))
+        val  = _int(r.get("trade_value",  0))
+        inst = _int(r.get("inst_net",     0))
+        avg  = _flt(r.get("avg_price")) or (val / vol if vol else 0.0)
+        ival = _flt(r.get("inst_value")) or round(inst * avg / 1e8, 6)
         rows.append((
-            r["date"], str(r["code"]).zfill(4), r.get("market", ""),
-            r.get("name", ""),
-            _flt(r.get("close_price")),
-            vol, val, round(avg, 2), inst, ival, ival,
+            r["date"], str(r["code"]).zfill(4), r.get("market", ""), r.get("name", ""),
+            _flt(r.get("close_price")), vol, val, round(avg, 2), inst, ival, ival,
         ))
     with _db() as c:
         c.executemany("""
             INSERT OR REPLACE INTO daily
-            (date,code,market,name,close_price,
-             trade_volume,trade_value,avg_price,inst_net,inst_value,net_yi)
+            (date,code,market,name,close_price,trade_volume,trade_value,avg_price,inst_net,inst_value,net_yi)
             VALUES (?,?,?,?,?,?,?,?,?,?,?)
         """, rows)
     from collections import Counter
@@ -151,7 +146,7 @@ def db_save(df: pd.DataFrame) -> int:
     return len(rows)
 
 
-# ── 工具函式 ──────────────────────────────────────────────────────────
+# ── 工具 ──────────────────────────────────────────────────────────────
 def _flt(v) -> float:
     try:    return float(str(v).replace(",", "").strip())
     except: return 0.0
@@ -180,20 +175,27 @@ def _get(url, params=None, headers=None, verify=True, retries=3, delay=2.0):
     return None
 
 
-def _parse_roc_date(s: str) -> str:
+def _roc(s: str) -> str:
+    """民國年 → 西元，支援 '1150612'(7碼) 和 '115/06/12'"""
     s = str(s).strip()
+    if "/" in s:
+        try:
+            y, m, d = s.split("/")
+            return f"{int(y)+1911}-{int(m):02d}-{int(d):02d}"
+        except Exception:
+            return ""
     if len(s) == 7 and s.isdigit():
         return f"{int(s[:3])+1911}-{s[3:5]}-{s[5:7]}"
     return ""
 
 
-# ── TWSE API ──────────────────────────────────────────────────────────
+# ── TWSE 今日 ─────────────────────────────────────────────────────────
 def fetch_twse_today() -> tuple[str, dict]:
-    """openapi STOCK_DAY_ALL → (trade_date, {code: {name,close,volume,value}})"""
+    """openapi STOCK_DAY_ALL（只有最新交易日）→ (date, {code:{name,close,volume,value}})"""
     data = _get("https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_ALL")
     if not isinstance(data, list) or len(data) < 100:
         raise RuntimeError(f"TWSE STOCK_DAY_ALL failed: {len(data) if data else 0} rows")
-    trade_date = _parse_roc_date(data[0].get("Date", "")) if data else TODAY
+    trade_date = _roc(data[0].get("Date", "")) or TODAY
     result = {}
     for item in data:
         code = str(item.get("Code", "")).strip().zfill(4)
@@ -209,29 +211,8 @@ def fetch_twse_today() -> tuple[str, dict]:
     return trade_date, result
 
 
-def fetch_twse_by_date(date8: str) -> dict[str, dict]:
-    """www STOCK_DAY_ALL?date= → {code: {close,volume,value}}（歷史補抓用）"""
-    data = _get(
-        "https://www.twse.com.tw/exchangeReport/STOCK_DAY_ALL",
-        params={"response": "json", "date": date8},
-        retries=2, delay=2.0,
-    )
-    if not isinstance(data, dict) or data.get("stat") != "OK":
-        return {}
-    result = {}
-    for row in data.get("data", []):
-        if len(row) < 5:
-            continue
-        code = str(row[0]).strip().zfill(4)
-        if not code.strip("0"):
-            continue
-        result[code] = {"close": _flt(row[4]), "volume": _int(row[2]), "value": _int(row[3])}
-    log.info(f"TWSE {date8}: {len(result)} stocks")
-    return result
-
-
 def fetch_t86(date8: str) -> dict[str, int]:
-    """T86 → {code: inst_net_shares}"""
+    """T86?date= → {code: inst_net_shares}（支援歷史）"""
     data = _get(
         "https://www.twse.com.tw/rwd/zh/fund/T86",
         params={"response": "json", "date": date8, "selectType": "ALL"},
@@ -247,22 +228,83 @@ def fetch_t86(date8: str) -> dict[str, int]:
     return result
 
 
-def fetch_twse_history(dates: list[str]) -> pd.DataFrame:
-    """逐日補抓 TWSE 歷史（每日一次全市場請求）"""
-    if not dates:
-        return pd.DataFrame()
-    log.info(f"TWSE history backfill: {len(dates)} dates")
-    rows = []
-    for i, dd in enumerate(sorted(dates)):
-        d8    = dd.replace("-", "")
-        price = fetch_twse_by_date(d8)
-        t86   = fetch_t86(d8)
-        if not price:
-            time.sleep(1.0)
+# ── TWSE 歷史（個股逐月 STOCK_DAY）─────────────────────────────────────
+def fetch_twse_stock_month(code: str, month8: str) -> dict[str, dict]:
+    """
+    STOCK_DAY?stockNo=&date=YYYYMM01 → {date: {close,volume,value}}
+    fields: [日期, 成交股數(1), 成交金額(2), 開盤, 最高, 最低, 收盤價(6), ...]
+    """
+    data = _get(
+        "https://www.twse.com.tw/exchangeReport/STOCK_DAY",
+        params={"response": "json", "date": month8, "stockNo": code},
+        retries=2, delay=1.0,
+    )
+    if not isinstance(data, dict) or data.get("stat") != "OK":
+        return {}
+    out = {}
+    for row in data.get("data", []):
+        if len(row) < 7:
             continue
-        for code, p in price.items():
+        dd = _roc(row[0])
+        if not dd:
+            continue
+        out[dd] = {
+            "volume": _int(row[1]),
+            "value":  _int(row[2]),
+            "close":  _flt(row[6]),
+        }
+    return out
+
+
+def _twse_hist_one(code: str, months: list[str]) -> tuple[str, dict]:
+    merged = {}
+    for m8 in months:
+        merged.update(fetch_twse_stock_month(code, m8))
+        time.sleep(0.3)
+    return code, merged
+
+
+def fetch_twse_history(codes: list[str], dates: list[str], workers: int = 6) -> pd.DataFrame:
+    """
+    逐股逐月補抓 TWSE 歷史成交（含真均價），再配 T86 三大法人
+    codes: TWSE 代號清單；dates: 需要的交易日（決定要抓哪幾個月 + 配哪幾天 T86）
+    """
+    if not codes or not dates:
+        return pd.DataFrame()
+
+    months = sorted({d.replace("-", "")[:6] + "01" for d in dates})
+    log.info(f"TWSE history: {len(codes)} codes × {len(months)} months (parallel={workers})")
+
+    price_hist: dict[str, dict] = {}
+    done = 0
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        futs = {pool.submit(_twse_hist_one, c, months): c for c in codes}
+        for fut in as_completed(futs):
+            code = futs[fut]
+            try:
+                _, merged = fut.result()
+                price_hist[code] = merged
+            except Exception as e:
+                log.warning(f"TWSE hist {code}: {e}")
+                price_hist[code] = {}
+            done += 1
+            if done % 200 == 0:
+                log.info(f"  TWSE history progress: {done}/{len(codes)}")
+
+    # T86 逐日（只抓需要的交易日）
+    t86_cache = {}
+    for dd in sorted(set(dates)):
+        t86_cache[dd] = fetch_t86(dd.replace("-", ""))
+        time.sleep(0.3)
+
+    want = set(dates)
+    rows = []
+    for code, day_data in price_hist.items():
+        for dd, p in day_data.items():
+            if dd not in want:
+                continue
             avg  = p["value"] / p["volume"] if p["volume"] else 0.0
-            inst = t86.get(code, 0)
+            inst = t86_cache.get(dd, {}).get(code, 0)
             ival = round(inst * avg / 1e8, 6)
             rows.append({
                 "date": dd, "code": code, "market": "TWSE", "name": "",
@@ -270,20 +312,16 @@ def fetch_twse_history(dates: list[str]) -> pd.DataFrame:
                 "trade_value": p["value"], "avg_price": round(avg, 2),
                 "inst_net": inst, "inst_value": ival, "net_yi": ival,
             })
-        if i < len(dates) - 1:
-            time.sleep(0.5)
     df = pd.DataFrame(rows)
     log.info(f"TWSE history: {len(df)} rows, {df['date'].nunique() if not df.empty else 0} dates")
     return df
 
 
-# ── TPEx API ──────────────────────────────────────────────────────────
+# ── TPEx（新版 www API，支援歷史日期）─────────────────────────────────
 def fetch_tpex_quotes(date_str: str = None) -> tuple[str, dict]:
     """
-    TPEx 新版行情 API（支援歷史日期）
-    date_str: 'YYYY/MM/DD'（民國年自動轉換），None=今日
-    回傳 (trade_date, {code: {name,close,volume,value}})
-    欄位順序：[代號,名稱,收盤,漲跌,開盤,最高,最低,均價,成交股數,成交金額,...]
+    afterTrading/dailyQuotes?date=YYYY/MM/DD → (date, {code:{name,close,volume,value}})
+    data 欄位: [代號(0),名稱(1),收盤(2),...,成交股數(8),成交金額(9)]
     """
     d = date_str or date.today().strftime("%Y/%m/%d")
     data = _get(
@@ -297,13 +335,10 @@ def fetch_tpex_quotes(date_str: str = None) -> tuple[str, dict]:
     if not tables or not tables[0].get("data"):
         log.warning(f"TPEx quotes empty for {d}")
         return "", {}
-    table = tables[0]
-    # date 欄位：外層 "20260612" 或 table 內 "115/06/12"
-    raw_date = data.get("date", "")
-    trade_date = f"{raw_date[:4]}-{raw_date[4:6]}-{raw_date[6:8]}" if len(raw_date) == 8 else TODAY
-
+    raw = data.get("date", "")
+    trade_date = f"{raw[:4]}-{raw[4:6]}-{raw[6:8]}" if len(raw) == 8 else TODAY
     result = {}
-    for row in table["data"]:
+    for row in tables[0]["data"]:
         if len(row) < 10:
             continue
         code  = str(row[0]).strip().zfill(4)
@@ -322,10 +357,8 @@ def fetch_tpex_quotes(date_str: str = None) -> tuple[str, dict]:
 
 def fetch_tpex_inst(date_str: str = None) -> dict[str, int]:
     """
-    TPEx 新版三大法人 API（支援歷史日期）
-    date_str: 'YYYY/MM/DD'，None=今日
-    回傳 {code: inst_net_shares}
-    欄位：最後一欄(index 24)為「三大法人買賣超股數合計」
+    insti/dailyTrade?date=YYYY/MM/DD → {code: inst_net}
+    最後一欄(row[-1]) = 三大法人買賣超股數合計
     """
     d = date_str or date.today().strftime("%Y/%m/%d")
     data = _get(
@@ -339,30 +372,26 @@ def fetch_tpex_inst(date_str: str = None) -> dict[str, int]:
     if not tables or not tables[0].get("data"):
         log.warning(f"TPEx inst empty for {d}")
         return {}
-    rows = tables[0]["data"]
     result = {}
-    for row in rows:
+    for row in tables[0]["data"]:
         if len(row) < 3:
             continue
         code = str(row[0]).strip().zfill(4)
         if not code.strip("0"):
             continue
-        result[code] = _int(row[-1])   # 最後一欄=三大法人買賣超股數合計
+        result[code] = _int(row[-1])
     log.info(f"TPEx inst: {len(result)} stocks")
     return result
 
 
 def fetch_tpex_history(dates: list[str]) -> pd.DataFrame:
-    """
-    逐日補抓 TPEx 歷史（行情 + 三大法人），用新版 www API
-    dates: ['2026-06-12', ...]
-    """
+    """逐日補抓 TPEx 歷史（行情 + 三大法人）"""
     if not dates:
         return pd.DataFrame()
-    log.info(f"TPEx history backfill: {len(dates)} dates")
+    log.info(f"TPEx history: {len(dates)} dates")
     rows = []
     for i, dd in enumerate(sorted(dates)):
-        d_slash = dd.replace("-", "/")
+        d_slash  = dd.replace("-", "/")
         _, price = fetch_tpex_quotes(d_slash)
         inst     = fetch_tpex_inst(d_slash)
         if not price:
@@ -387,10 +416,6 @@ def fetch_tpex_history(dates: list[str]) -> pd.DataFrame:
 
 # ── 今日抓取 ──────────────────────────────────────────────────────────
 def fetch_today() -> pd.DataFrame:
-    """
-    並行抓取 TWSE / TPEx 今日資料。
-    STOCK_DAY_ALL 永遠是 T-1，T86 試今日，有則用今日日期存入。
-    """
     with ThreadPoolExecutor(max_workers=3) as pool:
         f_tw = pool.submit(fetch_twse_today)
         f_tp = pool.submit(fetch_tpex_quotes)
@@ -399,7 +424,7 @@ def fetch_today() -> pd.DataFrame:
         tpex_date, r_tp = f_tp.result()
         r_ti = f_ti.result()
 
-    # T86 先試今日，若有資料則以今日為 TWSE 日期
+    # T86 先試今日，有則以今日為 TWSE 日期
     t86_today = fetch_t86(TODAY_8)
     if t86_today:
         twse_date = TODAY
@@ -407,7 +432,7 @@ def fetch_today() -> pd.DataFrame:
         log.info(f"T86 {TODAY}: {len(t86_today)} entries (today available)")
     else:
         r_ti_tw = fetch_t86(twse_date.replace("-", ""))
-        log.info(f"T86 {twse_date}: using STOCK_DAY_ALL date (T86 not yet available)")
+        log.info(f"T86 {twse_date}: STOCK_DAY_ALL date (T86 not yet available)")
 
     tpex_date = tpex_date or TODAY
 
@@ -416,22 +441,18 @@ def fetch_today() -> pd.DataFrame:
         avg  = p["value"] / p["volume"] if p["volume"] else 0.0
         inst = r_ti_tw.get(code, 0)
         ival = round(inst * avg / 1e8, 6)
-        rows.append({
-            "date": twse_date, "code": code, "market": "TWSE", "name": p["name"],
-            "close_price": p["close"], "trade_volume": p["volume"],
-            "trade_value": p["value"], "avg_price": round(avg, 2),
-            "inst_net": inst, "inst_value": ival, "net_yi": ival,
-        })
+        rows.append({"date": twse_date, "code": code, "market": "TWSE", "name": p["name"],
+                     "close_price": p["close"], "trade_volume": p["volume"],
+                     "trade_value": p["value"], "avg_price": round(avg, 2),
+                     "inst_net": inst, "inst_value": ival, "net_yi": ival})
     for code, p in r_tp.items():
         avg  = p["value"] / p["volume"] if p["volume"] else 0.0
         inst = r_ti.get(code, 0)
         ival = round(inst * avg / 1e8, 6)
-        rows.append({
-            "date": tpex_date, "code": code, "market": "TPEx", "name": p["name"],
-            "close_price": p["close"], "trade_volume": p["volume"],
-            "trade_value": p["value"], "avg_price": round(avg, 2),
-            "inst_net": inst, "inst_value": ival, "net_yi": ival,
-        })
+        rows.append({"date": tpex_date, "code": code, "market": "TPEx", "name": p["name"],
+                     "close_price": p["close"], "trade_volume": p["volume"],
+                     "trade_value": p["value"], "avg_price": round(avg, 2),
+                     "inst_net": inst, "inst_value": ival, "net_yi": ival})
 
     df = pd.DataFrame(rows)
     tw_n = sum(1 for r in rows if r["market"] == "TWSE")
@@ -442,7 +463,6 @@ def fetch_today() -> pd.DataFrame:
 
 # ── yfinance 收盤價 ────────────────────────────────────────────────────
 def fetch_close_yfinance(codes_market: dict[str, str], days: int = 35) -> pd.DataFrame:
-    """批次抓取收盤價歷史，分批避免限速"""
     import yfinance as yf
 
     def supported(code):
@@ -464,20 +484,18 @@ def fetch_close_yfinance(codes_market: dict[str, str], days: int = 35) -> pd.Dat
     skipped = len(codes_market) - len(tickers)
     if skipped:
         log.info(f"yfinance: skipped {skipped} unsupported codes")
-
     if not tickers:
         return pd.DataFrame()
 
-    ticker_list = list(tickers.keys())
-    batch_size  = 200
-    batches     = [ticker_list[i:i+batch_size] for i in range(0, len(ticker_list), batch_size)]
+    tl      = list(tickers.keys())
+    bs      = 200
+    batches = [tl[i:i+bs] for i in range(0, len(tl), bs)]
     log.info(f"yfinance: {len(tickers)} tickers → {len(batches)} batches ({days}d)")
 
     all_rows = []
     for i, batch in enumerate(batches):
         try:
-            raw = yf.download(batch, period=f"{days}d",
-                              auto_adjust=True, progress=False, threads=True)
+            raw = yf.download(batch, period=f"{days}d", auto_adjust=True, progress=False, threads=True)
             if raw.empty:
                 continue
             close = raw["Close"] if "Close" in raw.columns else raw.get("Adj Close", pd.DataFrame())
@@ -489,11 +507,7 @@ def fetch_close_yfinance(codes_market: dict[str, str], days: int = 35) -> pd.Dat
                 code = tickers[ticker]
                 for dt, price in close[ticker].dropna().items():
                     if price > 0:
-                        all_rows.append({
-                            "date":        str(dt)[:10],
-                            "code":        code,
-                            "close_price": float(price),
-                        })
+                        all_rows.append({"date": str(dt)[:10], "code": code, "close_price": float(price)})
             log.info(f"yfinance batch {i+1}/{len(batches)}: done")
         except Exception as e:
             log.warning(f"yfinance batch {i+1}/{len(batches)} failed: {e}")
@@ -509,10 +523,6 @@ def fetch_close_yfinance(codes_market: dict[str, str], days: int = 35) -> pd.Dat
 
 # ── 族群清單 ──────────────────────────────────────────────────────────
 def load_groups() -> tuple[dict[str, list[str]], dict[str, str]]:
-    """
-    input/group.csv（cp950）
-    row 0: 族群名, row 1: 代號/名稱標題, row 2+: 資料
-    """
     text = open(GROUP_CSV, "rb").read().decode("cp950", errors="replace")
     df   = pd.read_csv(StringIO(text), header=None)
     groups: dict[str, list[str]] = {}
@@ -537,15 +547,9 @@ def load_groups() -> tuple[dict[str, list[str]], dict[str, str]]:
 
 
 # ── 計算 ──────────────────────────────────────────────────────────────
-def compute(
-    hist_df:     pd.DataFrame,
-    yf_close_df: pd.DataFrame,
-    groups:      dict[str, list[str]],
-    name_map:    dict[str, str],
-) -> tuple[list[dict], dict[str, list[dict]]]:
-
+def compute(hist_df, yf_close_df, groups, name_map):
     if hist_df.empty:
-        return [], {}
+        return [], {}, {}
 
     df = hist_df.copy()
     df["code"] = df["code"].astype(str).str.zfill(4)
@@ -553,7 +557,6 @@ def compute(
     all_dates  = sorted(df["date"].unique())
     log.info(f"DB dates: {all_dates[0]} ~ {all_dates[-1]} ({len(all_dates)} days)")
 
-    # ── 收盤價序列（yfinance） ──────────────────────────────────────
     if not yf_close_df.empty:
         yf = yf_close_df.copy()
         yf["code"] = yf["code"].astype(str).str.zfill(4)
@@ -565,10 +568,9 @@ def compute(
         close_dates = sorted(close_pv.columns)
         log.warning("No yfinance data, using DB close_price")
 
-    latest      = close_dates[-1]
-    close_now   = close_pv[latest].dropna()
+    latest    = close_dates[-1]
+    close_now = close_pv[latest].dropna()
 
-    # 漲跌幅基準日（yfinance 日期序列）
     d1  = close_dates[-2]  if len(close_dates) >= 2  else None
     d2  = close_dates[-3]  if len(close_dates) >= 3  else None
     d3  = close_dates[-4]  if len(close_dates) >= 4  else None
@@ -576,7 +578,7 @@ def compute(
     d21 = close_dates[-21] if len(close_dates) >= 21 else None
     log.info(f"latest={latest}, chg_1d base={d1}, chg_5d base={d6}, chg_20d base={d21}")
 
-    def pct(base) -> pd.Series:
+    def pct(base):
         if not base or base not in close_pv.columns:
             return pd.Series(0.0, index=close_now.index)
         b     = close_pv[base]
@@ -587,12 +589,11 @@ def compute(
         return s
 
     chg_1d  = pct(d1)
-    chg_p1  = pct(d2)   # 前一日漲跌（標籤用）
-    chg_p2  = pct(d3)   # 前二日漲跌（標籤用）
+    chg_p1  = pct(d2)
+    chg_p2  = pct(d3)
     chg_5d  = pct(d6)
     chg_20d = pct(d21)
 
-    # ── 買賣超序列（DB 日期） ───────────────────────────────────────
     net_pv   = df.pivot_table(index="code", columns="date", values="net_yi", aggfunc="first")
     db_last  = all_dates[-1]
     db_prev  = all_dates[-2] if len(all_dates) >= 2 else None
@@ -604,40 +605,29 @@ def compute(
     net_20d  = net_pv[[c for c in last20 if c in net_pv.columns]].sum(axis=1).fillna(0.0)
     log.info(f"net_5d: min={round(float(net_5d.min()),2)}, max={round(float(net_5d.max()),2)}, nonzero={int((net_5d != 0).sum())}")
 
-    # 逐日 net_yi 序列（最近5天，供選股用）
     net_days = {f"net_d{i+1}": net_pv[d].fillna(0.0) if d in net_pv.columns else pd.Series(0.0, index=net_pv.index)
                 for i, d in enumerate(reversed(last5))}
 
-    # 逐日漲跌序列（最近5天）
-    chg_days_bases = [close_dates[-2], close_dates[-3], close_dates[-4], close_dates[-5], close_dates[-6]] \
-                     if len(close_dates) >= 6 else []
+    chg_bases = [close_dates[-(i+2)] for i in range(5)] if len(close_dates) >= 6 else []
     chg_days = {}
-    for i, base in enumerate(chg_days_bases):
-        key = f"chg_d{i+1}"
-        if base and base in close_pv.columns:
-            target = close_dates[-(i+1)] if i+1 <= len(close_dates) else close_dates[0]
-            if target in close_pv.columns:
-                b = close_pv[base]; c_ = close_pv[target]
-                v = (c_ - b) / b.where(b > 0.01) * 100
-                chg_days[key] = v.fillna(0.0)
-            else:
-                chg_days[key] = pd.Series(0.0, index=net_pv.index)
+    for i, base in enumerate(chg_bases):
+        key    = f"chg_d{i+1}"
+        target = close_dates[-(i+1)]
+        if base in close_pv.columns and target in close_pv.columns:
+            b = close_pv[base]; c_ = close_pv[target]
+            chg_days[key] = ((c_ - b) / b.where(b > 0.01) * 100).fillna(0.0)
         else:
             chg_days[key] = pd.Series(0.0, index=net_pv.index)
 
-    def safe(v) -> float:
+    def safe(v):
         import math
         f = float(v) if v is not None else 0.0
         return 0.0 if (math.isnan(f) or math.isinf(f)) else f
 
     db_names = df[df["date"] == db_last].set_index("code")["name"].to_dict()
+    get_name = lambda c: name_map.get(c) or db_names.get(c, "")
 
-    def get_name(code):
-        return name_map.get(code) or db_names.get(code, "")
-
-    records: list[dict]             = []
-    details: dict[str, list[dict]] = {}
-    all_stocks_map: dict[str, dict] = {}   # code → stock dict（用於去重計算與選股）
+    records, details, all_map = [], {}, {}
 
     for gname, raw_codes in groups.items():
         codes = [c.zfill(4) for c in raw_codes if c.zfill(4) in close_now.index]
@@ -650,33 +640,21 @@ def compute(
             c20 = safe(chg_20d.get(c, 0)); c20 = 0.0 if abs(c20) > 200 else c20
             nd  = {k: round(safe(v.get(c, 0)), 4) for k, v in net_days.items()}
             cd  = {k: round(safe(v.get(c, 0)), 2) for k, v in chg_days.items()}
-            s = {
-                "code":     c,
-                "name":     get_name(c),
-                "close":    round(float(close_now.get(c, 0)), 2),
-                "net_1d":   round(safe(net_1d.get(c,   0)), 4),
-                "net_prev": round(safe(net_prev.get(c,  0)), 4),
-                "net_5d":   round(safe(net_5d.get(c,   0)), 4),
-                "net_20d":  round(safe(net_20d.get(c,  0)), 4),
-                "chg_1d":   round(c1,  2),
-                "chg_prev1":round(cp1, 2),
-                "chg_prev2":round(cp2, 2),
-                "chg_5d":   round(c5,  2),
-                "chg_20d":  round(c20, 2),
-                **nd, **cd,
-            }
+            s = {"code": c, "name": get_name(c), "close": round(float(close_now.get(c, 0)), 2),
+                 "net_1d": round(safe(net_1d.get(c, 0)), 4), "net_prev": round(safe(net_prev.get(c, 0)), 4),
+                 "net_5d": round(safe(net_5d.get(c, 0)), 4), "net_20d": round(safe(net_20d.get(c, 0)), 4),
+                 "chg_1d": round(c1, 2), "chg_prev1": round(cp1, 2), "chg_prev2": round(cp2, 2),
+                 "chg_5d": round(c5, 2), "chg_20d": round(c20, 2), **nd, **cd}
             stocks.append(s)
-            if c not in all_stocks_map:
-                all_stocks_map[c] = s
+            if c not in all_map:
+                all_map[c] = s
         stocks.sort(key=lambda x: x["net_1d"], reverse=True)
         details[gname] = stocks
 
         if not codes:
-            records.append({
-                "g": gname, "cnt": len(raw_codes), "matched": 0,
-                "net_1d": 0.0, "net_prev": 0.0, "net_5d": 0.0, "net_20d": 0.0,
-                "chg_1d": 0.0, "chg_5d": 0.0, "chg_20d": 0.0, "label": "觀望",
-            })
+            records.append({"g": gname, "cnt": len(raw_codes), "matched": 0,
+                            "net_1d": 0.0, "net_prev": 0.0, "net_5d": 0.0, "net_20d": 0.0,
+                            "chg_1d": 0.0, "chg_5d": 0.0, "chg_20d": 0.0, "label": "觀望"})
             continue
 
         g1     = round(sum(s["net_1d"]   for s in stocks), 3)
@@ -688,34 +666,32 @@ def compute(
             vals = [s[key] for s in stocks if s[key] != 0.0]
             return round(sum(vals) / len(vals), 2) if vals else 0.0
 
-        gc1  = gavg("chg_1d");  gc1  = 0.0 if abs(gc1)  > 11  else gc1
+        gc1  = gavg("chg_1d");    gc1  = 0.0 if abs(gc1)  > 11  else gc1
         gcp1 = gavg("chg_prev1"); gcp1 = 0.0 if abs(gcp1) > 11  else gcp1
         gcp2 = gavg("chg_prev2"); gcp2 = 0.0 if abs(gcp2) > 11  else gcp2
-        gc5  = gavg("chg_5d");  gc5  = 0.0 if abs(gc5)  > 60  else gc5
-        gc20 = gavg("chg_20d"); gc20 = 0.0 if abs(gc20) > 200 else gc20
-        if abs(g1)  > 1000:  g1   = 0.0
-        if abs(g5)  > 5000:  g5   = 0.0
-        if abs(g20) > 20000: g20  = 0.0
+        gc5  = gavg("chg_5d");    gc5  = 0.0 if abs(gc5)  > 60  else gc5
+        gc20 = gavg("chg_20d");   gc20 = 0.0 if abs(gc20) > 200 else gc20
+        if abs(g1)  > 1000:  g1  = 0.0
+        if abs(g5)  > 5000:  g5  = 0.0
+        if abs(g20) > 20000: g20 = 0.0
 
-        g5_avg        = g5 / 5 if g5 else 0.0
-        flow_pos      = g1 > 0 and g_prev > 0 and g1 > g5_avg and g_prev > g5_avg
-        flow_neg      = g1 < 0 and g_prev < 0 and g1 < g5_avg and g_prev < g5_avg
-        all3_pos      = gc1 > 0 and gcp1 > 0 and gcp2 > 0
+        g5_avg   = g5 / 5 if g5 else 0.0
+        flow_pos = g1 > 0 and g_prev > 0 and g1 > g5_avg and g_prev > g5_avg
+        flow_neg = g1 < 0 and g_prev < 0 and g1 < g5_avg and g_prev < g5_avg
+        all3_pos = gc1 > 0 and gcp1 > 0 and gcp2 > 0
 
         if   flow_pos and all3_pos and gc5 > 0:       label = "主力"
         elif flow_pos and (not all3_pos or gc5 <= 0): label = "輪動"
         elif flow_neg:                                 label = "退潮"
         else:                                          label = "觀望"
 
-        records.append({
-            "g": gname, "cnt": len(raw_codes), "matched": len(codes),
-            "net_1d": g1, "net_prev": g_prev, "net_5d": g5, "net_20d": g20,
-            "chg_1d": gc1, "chg_5d": gc5, "chg_20d": gc20, "label": label,
-        })
+        records.append({"g": gname, "cnt": len(raw_codes), "matched": len(codes),
+                        "net_1d": g1, "net_prev": g_prev, "net_5d": g5, "net_20d": g20,
+                        "chg_1d": gc1, "chg_5d": gc5, "chg_20d": gc20, "label": label})
 
-    label_counts = {l: sum(1 for r in records if r["label"] == l) for l in ["主力","輪動","退潮","觀望"]}
-    log.info(f"Groups: {len(records)} | " + " | ".join(f"{l}={n}" for l, n in label_counts.items()))
-    return records, details, all_stocks_map
+    lc = {l: sum(1 for r in records if r["label"] == l) for l in ["主力","輪動","退潮","觀望"]}
+    log.info(f"Groups: {len(records)} | " + " | ".join(f"{l}={n}" for l, n in lc.items()))
+    return records, details, all_map
 
 
 # ── 輸出 ──────────────────────────────────────────────────────────────
@@ -735,16 +711,11 @@ def _jdump(fname, data):
 
 def export_json(records, details, all_stocks, trade_date):
     DATA_DIR.mkdir(parents=True, exist_ok=True)
+    attach = lambda lst: [{**r, "stocks": details.get(r["g"], [])} for r in lst]
 
-    def attach(lst):
-        return [{**r, "stocks": details.get(r["g"], [])} for r in lst]
-
-    bubble = [{
-        **r,
-        "x": r["net_5d"], "y": r["net_1d"],
-        "size": max(10, min(72, abs(r["net_5d"]) * 2.8 + 12)),
-        "stocks": details.get(r["g"], []),
-    } for r in records]
+    bubble = [{**r, "x": r["net_5d"], "y": r["net_1d"],
+               "size": max(10, min(72, abs(r["net_5d"]) * 2.8 + 12)),
+               "stocks": details.get(r["g"], [])} for r in records]
 
     def fp(r):
         avg = r["net_5d"] / 5 if r["net_5d"] else 0.0
@@ -753,15 +724,11 @@ def export_json(records, details, all_stocks, trade_date):
     def p3le(r, t):
         return r["chg_1d"] <= t or r.get("chg_prev1", 0) <= t or r.get("chg_prev2", 0) <= t
 
-    inflow = attach(sorted(
-        [r for r in records if fp(r) and p3le(r, 5.0) and r["chg_5d"] <= 10.0],
-        key=lambda x: x["net_5d"], reverse=True
-    ))
-    stealth = attach(sorted(
-        [r for r in records if r["net_1d"] > 0 and r["net_prev"] > 0
-         and r["net_5d"] < 0 and p3le(r, 5.0) and r["chg_5d"] <= 10.0],
-        key=lambda x: x["net_5d"]
-    ))
+    inflow = attach(sorted([r for r in records if fp(r) and p3le(r, 5.0) and r["chg_5d"] <= 10.0],
+                           key=lambda x: x["net_5d"], reverse=True))
+    stealth = attach(sorted([r for r in records if r["net_1d"] > 0 and r["net_prev"] > 0
+                             and r["net_5d"] < 0 and p3le(r, 5.0) and r["chg_5d"] <= 10.0],
+                            key=lambda x: x["net_5d"]))
 
     _jdump("bubble_data.json",          bubble)
     _jdump("inflow_low_gain.json",      inflow)
@@ -770,10 +737,8 @@ def export_json(records, details, all_stocks, trade_date):
     _jdump("stock_screener.json",       list(all_stocks.values()))
     _jdump("metadata.json", {
         "last_updated":    datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        "trade_date":      trade_date,
-        "groups":          len(records),
-        "inflow":          len(inflow),
-        "stealth":         len(stealth),
+        "trade_date":      trade_date, "groups": len(records),
+        "inflow":          len(inflow), "stealth": len(stealth),
         "screener_stocks": len(all_stocks),
     })
     log.info(f"JSON: bubble={len(bubble)}, inflow={len(inflow)}, stealth={len(stealth)}, screener={len(all_stocks)}")
@@ -786,9 +751,7 @@ def export_csv():
                       close_price AS 收盤價, trade_volume AS 成交總股數,
                       trade_value AS 成交總金額, avg_price AS 成交均價,
                       inst_net AS 三大法人買賣超股數, inst_value AS 三大法人買賣超金額億
-               FROM daily ORDER BY date, market, code""",
-            c
-        )
+               FROM daily ORDER BY date, market, code""", c)
     if df.empty:
         return
     out = DATA_DIR / "market_data.csv"
@@ -799,10 +762,10 @@ def export_csv():
 # ── 主程式 ────────────────────────────────────────────────────────────
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--force",          action="store_true", help="強制重抓今日")
-    ap.add_argument("--dry-run",        action="store_true", help="不打API，只用現有DB重算")
-    ap.add_argument("--reset-history",  action="store_true", help="強制重新補抓TWSE歷史")
-    ap.add_argument("--purge-bad-data", action="store_true", help="清除trade_value=0的污染資料")
+    ap.add_argument("--force",          action="store_true")
+    ap.add_argument("--dry-run",        action="store_true")
+    ap.add_argument("--reset-history",  action="store_true")
+    ap.add_argument("--purge-bad-data", action="store_true")
     args = ap.parse_args()
 
     log.info("=" * 60)
@@ -825,38 +788,31 @@ def main():
                 log.info(f"Purge: deleted {n} bad rows")
 
     if not args.dry_run:
-        # ── 今日資料 ──────────────────────────────────────────────────
+        # 今日資料
         today_df = fetch_today()
         if today_df.empty:
-            log.error("Today fetch returned empty, aborting")
+            log.error("Today fetch empty, aborting")
             return
-
         for market in ["TWSE", "TPEx"]:
-            mdf   = today_df[today_df["market"] == market]
+            mdf = today_df[today_df["market"] == market]
             if mdf.empty:
                 continue
             mdate = mdf["date"].iloc[0]
             with _db() as c:
                 exists = c.execute(
                     "SELECT COUNT(*) FROM daily WHERE date=? AND market=? AND inst_net!=0",
-                    (mdate, market)
-                ).fetchone()[0]
+                    (mdate, market)).fetchone()[0]
             if not args.force and exists > 0:
                 log.info(f"[CACHE] {market} {mdate} already in DB")
             else:
                 db_save(mdf)
 
-        # ── TWSE + TPEx 歷史補抓（用 yfinance 交易日曆找缺漏）──────────────
+        # 歷史補抓（用 yfinance 交易日曆）
         with _db() as c:
-            twse_done = {r[0] for r in c.execute(
-                "SELECT DISTINCT date FROM daily WHERE market='TWSE'"
-            ).fetchall()}
-            tpex_done = {r[0] for r in c.execute(
-                "SELECT DISTINCT date FROM daily WHERE market='TPEx'"
-            ).fetchall()}
+            twse_done = {r[0] for r in c.execute("SELECT DISTINCT date FROM daily WHERE market='TWSE'").fetchall()}
+            tpex_done = {r[0] for r in c.execute("SELECT DISTINCT date FROM daily WHERE market='TPEx'").fetchall()}
 
-        need_backfill = (len(twse_done) < 21 or len(tpex_done) < 21 or args.reset_history)
-        if need_backfill:
+        if len(twse_done) < 21 or len(tpex_done) < 21 or args.reset_history:
             try:
                 import yfinance as yf
                 cal = yf.download("2330.TW", period="35d", auto_adjust=True, progress=False)
@@ -864,20 +820,24 @@ def main():
             except Exception as e:
                 log.warning(f"yfinance calendar: {e}")
                 yf_dates = set()
+            recent = sorted(yf_dates)[-25:]
 
-            # 只補最近 25 個交易日
-            recent = sorted(yf_dates)[-25:] if len(yf_dates) > 25 else sorted(yf_dates)
-
+            # TWSE 歷史（個股逐月）
             twse_missing = sorted(set(recent) - twse_done)
             if twse_missing:
-                log.info(f"TWSE missing {len(twse_missing)} dates: {twse_missing}")
-                hdf = fetch_twse_history(twse_missing)
-                if not hdf.empty:
-                    db_save(hdf)
+                today_db = db_load(days=1)
+                twse_codes = sorted(today_db[today_db["market"] == "TWSE"]["code"].astype(str).str.zfill(4).unique()) \
+                             if not today_db.empty else []
+                log.info(f"TWSE missing {len(twse_missing)} dates, {len(twse_codes)} codes")
+                if twse_codes:
+                    hdf = fetch_twse_history(twse_codes, twse_missing)
+                    if not hdf.empty:
+                        db_save(hdf)
 
+            # TPEx 歷史（每日全市場）
             tpex_missing = sorted(set(recent) - tpex_done)
             if tpex_missing:
-                log.info(f"TPEx missing {len(tpex_missing)} dates: {tpex_missing}")
+                log.info(f"TPEx missing {len(tpex_missing)} dates")
                 tdf = fetch_tpex_history(tpex_missing)
                 if not tdf.empty:
                     db_save(tdf)
@@ -887,10 +847,7 @@ def main():
         log.error("No data in DB")
         return
 
-    codes_market = dict(zip(
-        hist["code"].astype(str).str.zfill(4),
-        hist["market"]
-    )) if not hist.empty else {}
+    codes_market = dict(zip(hist["code"].astype(str).str.zfill(4), hist["market"]))
     yf_close = fetch_close_yfinance(codes_market)
 
     records, details, all_stocks = compute(hist, yf_close, groups, name_map)
