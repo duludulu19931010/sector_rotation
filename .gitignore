@@ -1,6 +1,19 @@
+# 資料庫（可重建，不進 git，留在 runner 本機跨次執行）
+db/
+*.db
+*.db-wal
+*.db-shm
+
+# Python
 __pycache__/
 *.pyc
+.venv/
+venv/
+
+# Log
 pipeline.log
-db/*.db-wal
-db/*.db-shm
-.env
+*.log
+
+# 暫存
+.DS_Store
+*.tmp
