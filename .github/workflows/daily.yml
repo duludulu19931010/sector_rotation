@@ -66,23 +66,32 @@ jobs:
         run: |
           $files = @(
             "docs\assets\data\bubble_data.json",
-            "docs\assets\data\metadata.json",
-            "db\market.db"
+            "docs\assets\data\metadata.json"
           )
           foreach ($f in $files) {
             if (Test-Path $f) { Write-Host "OK  $f  ($((Get-Item $f).Length) bytes)" }
             else { Write-Error "MISSING: $f"; exit 1 }
+          }
+          # DB 不進 git（留在本機供下次執行），僅確認存在
+          if (Test-Path "db\market.db") {
+            $mb = [math]::Round((Get-Item "db\market.db").Length / 1MB, 1)
+            Write-Host "DB local: $mb MB (not committed)"
           }
 
       - name: Commit & push
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add docs/assets/data/ db/market.db
+          # 清掉上次中斷殘留的 rebase 狀態
+          if (Test-Path ".git\rebase-merge") { git rebase --abort 2>$null; Remove-Item -Recurse -Force ".git\rebase-merge" -ErrorAction SilentlyContinue }
+          if (Test-Path ".git\rebase-apply") { git rebase --abort 2>$null; Remove-Item -Recurse -Force ".git\rebase-apply" -ErrorAction SilentlyContinue }
+          # 先同步遠端，再 commit，避免 rebase 衝突
+          git pull --rebase --autostash origin main
+          git add docs/assets/data/
           $s = git status --porcelain
           if ($s) {
-            git commit -m "data: $(Get-Date -Format 'yyyy-MM-dd HH:mm')"
-            git pull --rebase origin main
+            $msg = "data: $(Get-Date -Format 'yyyy-MM-dd HH:mm')"
+            git commit -m $msg -m "Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>" -m "Claude-Session: https://claude.ai/code/session_01YDZqRgyF67fE9Y2M5fK1bm"
             git push
           } else {
             Write-Host "Nothing to commit"
