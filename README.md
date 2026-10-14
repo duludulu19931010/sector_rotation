@@ -6,6 +6,40 @@ Self-hosted Runner（台灣本地機器）負責資料抓取與計算，GitHub P
 
 ---
 
+## 系統架構
+
+```mermaid
+flowchart TB
+    subgraph SRC["資料來源（官方 API）"]
+        TWSE["TWSE API<br/>成交 + T86 法人"]
+        TPEX["TPEx API<br/>行情 + 法人"]
+        YF["yfinance<br/>收盤價序列"]
+    end
+
+    subgraph RUNNER["台灣本地 Self-hosted Runner（GitHub Actions 每日排程）"]
+        PIPE["pipeline.py<br/>抓取 · 補歷史 · 計算族群"]
+        DB[("SQLite market.db<br/>本機保留 · 不進 git")]
+        OUT["計算輸出<br/>淨買賣超 · 漲跌幅 · 標籤 · 選股 → JSON"]
+        PIPE <--> DB
+        PIPE --> OUT
+    end
+
+    subgraph WEB["前端展示"]
+        PAGES["GitHub Pages · sector.html<br/>ECharts 泡泡圖 · 篩選 · 選股清單"]
+        USER["使用者瀏覽器"]
+        PAGES --> USER
+    end
+
+    TWSE --> PIPE
+    TPEX --> PIPE
+    YF --> PIPE
+    OUT -->|"git push（僅 JSON）"| PAGES
+```
+
+資料流向：三個官方 API 由本地 Runner 的 `pipeline.py` 抓取並計算，歷史存入本機 SQLite（不進 git），計算結果輸出成 JSON 後 `git push`，GitHub Pages 讀取 JSON 渲染前端。
+
+---
+
 ## 每日操作
 
 **GitHub Actions → Run workflow（不勾任何參數）**
@@ -137,16 +171,16 @@ TWSE 的 `openapi STOCK_DAY_ALL` 只回傳最新交易日（date 參數無效）
 ```
 ├── pipeline.py
 ├── requirements.txt
-├── .gitignore
+├── .gitignore                         db/、__pycache__/、log 皆不進 git
 ├── README.md
 ├── input/
 │   └── group.csv                      族群清單（cp950，唯一需維護的檔案）
-├── db/
-│   └── market.db                      SQLite（每日隨更新推送至 GitHub）
-├── docs/
+├── db/                                ⚠️ 不進 git，留在 Runner 本機跨次執行
+│   └── market.db                      SQLite（可重建，不上傳 GitHub）
+├── docs/                              GitHub Pages 根目錄
 │   ├── index.html
 │   ├── sector.html
-│   └── assets/data/
+│   └── assets/data/                   前端讀取的 JSON（每日 push）
 │       ├── bubble_data.json
 │       ├── inflow_low_gain.json
 │       ├── stealth_accumulation.json
@@ -211,6 +245,22 @@ TWSE 沒有「全市場歷史」的單一端點，歷史成交量/金額只能�
 
 ---
 
+## 資料庫管理
+
+`db/market.db` **不進 git**，只留在 Runner 本機。原因：
+
+- **Runner 是持久機器**：`_work` 目錄跨次執行保留，DB 一直在本機，`pipeline.py` 每次都讀得到歷史。透過 git 傳遞 DB 是多餘的。
+- **避免 100MB 超標**：DB 隨時間累積會持續變大，GitHub 單檔上限 100MB，一旦超過 push 會被硬性拒絕。
+- **避免二進位 diff**：每日 commit 幾 MB 的 .db 變動會讓 repo 體積暴增。
+
+前端只需要 `docs/assets/data/*.json`，這些照常 commit 並部署到 GitHub Pages，不受影響。
+
+### 如果 DB 曾被 commit 進 git
+
+若 repo 歷史裡已有 `db/market.db`（例如舊版 workflow 曾上傳），即使現在 `.gitignore` 排除它，那筆大檔仍留在 git 歷史裡，repo 會永遠超標。需用 `git filter-branch` 從歷史徹底移除後 force push。本專案附 `fix_repo.ps1` 一次性修復腳本處理此情況。
+
+---
+
 ## 障礙排除
 
 | 現象 | 可能原因 | 解法 |
@@ -220,6 +270,8 @@ TWSE 沒有「全市場歷史」的單一端點，歷史成交量/金額只能�
 | 某些 ETN 代號報錯（$7xxxxx） | yfinance 不支援 ETN | 已自動過濾，不影響 |
 | 頁面顯示「載入中」卡住 | sector.html 為舊版或 JSON 未推送 | F12 Console 看錯誤，確認 sector.html 為最新版 |
 | `database is locked` | 上次執行中斷 | 刪除 db/market.db-wal 和 db/market.db-shm |
+| push 被拒：File exceeds 100MB | DB 曾進 git 且 .db 過大 | 執行 `fix_repo.ps1`，從歷史移除 DB |
+| push 被拒：rebase-merge directory exists | 上次 `git pull --rebase` 中斷殘留 | `git rebase --abort` 後 `rm -rf .git/rebase-merge`（新版 workflow 已自動清理）|
 | API 抓取失敗 | TWSE/TPEx API 暫時無回應 | 等待後重跑，通常收盤後幾分鐘可用 |
 
 ---
